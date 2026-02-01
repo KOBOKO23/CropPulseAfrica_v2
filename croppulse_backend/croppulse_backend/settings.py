@@ -8,7 +8,15 @@ https://docs.djangoproject.com/en/5.2/topics/settings/
 
 from pathlib import Path
 from datetime import timedelta
+import environ
 
+# Initialize environment variables
+env = environ.Env(
+    DEBUG=(bool, True)
+)
+
+# Read .env file if it exists
+environ.Env.read_env()
 # ----------------------------------------------------------------------
 # Base directory
 # ----------------------------------------------------------------------
@@ -39,6 +47,9 @@ INSTALLED_APPS = [
     'rest_framework_simplejwt',
     # Your apps will be added here later
     'apps.accounts',
+    'apps.farmers',
+    'apps.farms',
+    'apps.satellite',
 ]
 
 # ----------------------------------------------------------------------
@@ -83,10 +94,15 @@ TEMPLATES = [
 # ----------------------------------------------------------------------
 DATABASES = {
     'default': {
-        'ENGINE': 'django.db.backends.sqlite3',
-        'NAME': BASE_DIR / 'db.sqlite3',
+        'ENGINE': 'django.contrib.gis.db.backends.postgis',
+        'NAME': 'croppulse',
+        'USER': 'croppulse_user',
+        'PASSWORD': 'KphiL2022*',
+        'HOST': 'localhost',
+        'PORT': '5433',
     }
 }
+
 
 # ----------------------------------------------------------------------
 # Password validation
@@ -144,4 +160,34 @@ SIMPLE_JWT = {
     'SIGNING_KEY': SECRET_KEY,
     'AUTH_HEADER_TYPES': ('Bearer',),
     'AUTH_HEADER_NAME': 'HTTP_AUTHORIZATION',
+}
+
+# Google Earth Engine Configuration
+GEE_SERVICE_ACCOUNT = env('GEE_SERVICE_ACCOUNT', default='your-service-account@project.iam.gserviceaccount.com')
+GEE_PRIVATE_KEY = env('GEE_PRIVATE_KEY', default='/path/to/private-key.json')
+
+# Celery Configuration
+CELERY_BROKER_URL = env('CELERY_BROKER_URL', default='redis://localhost:6379/0')
+CELERY_RESULT_BACKEND = env('CELERY_RESULT_BACKEND', default='redis://localhost:6379/0')
+CELERY_ACCEPT_CONTENT = ['json']
+CELERY_TASK_SERIALIZER = 'json'
+CELERY_RESULT_SERIALIZER = 'json'
+CELERY_TIMEZONE = 'Africa/Nairobi'
+
+# Celery Beat Schedule (for periodic tasks)
+from celery.schedules import crontab
+
+CELERY_BEAT_SCHEDULE = {
+    'update-ndvi-history-daily': {
+        'task': 'apps.satellite.tasks.update_ndvi_history',
+        'schedule': crontab(hour=2, minute=0),  # Run daily at 2 AM
+    },
+    'cleanup-old-scans-monthly': {
+        'task': 'apps.satellite.tasks.cleanup_old_scans',
+        'schedule': crontab(day_of_month=1, hour=3, minute=0),  # First day of month at 3 AM
+    },
+    'generate-health-alerts-daily': {
+        'task': 'apps.satellite.tasks.generate_health_alerts',
+        'schedule': crontab(hour=8, minute=0),  # Run daily at 8 AM
+    },
 }

@@ -1,72 +1,80 @@
-# Byte-compiled / optimized / DLL files
-__pycache__/
+# =========================
+# Python
+# =========================
 *.py[cod]
-*$py.class
-
-# C extensions
+__pycache__/
 *.so
-
-# Distribution / packaging
-.Python
-build/
-develop-eggs/
-dist/
-downloads/
-eggs/
-.eggs/
-lib/
-lib64/
-parts/
-sdist/
-var/
-*.egg-info/
-.installed.cfg
 *.egg
+*.egg-info/
+*.pyc
+*.pyo
+*.pyd
 
-# Django stuff
+# =========================
+# Virtual environments (Conda)
+# =========================
+# Ignore the entire Conda environment folder
+myenv/
+.env/
+.venv/
+.envrc
+
+# Conda temporary files
+conda-meta/
+pkgs/
+
+# =========================
+# Django
+# =========================
 *.log
 *.pot
 *.pyc
 *.pyo
 *.sqlite3
-*.sqlite
 db.sqlite3
-db.sqlite3-journal
-
-# Django migrations (keep the .py files, ignore __pycache__)
-apps/**/migrations/__pycache__/
-apps/**/migrations/*.pyc
-
-# Media and static files
 media/
 staticfiles/
-static/
+*.coverage
+*.pytest_cache/
+__pycache__/
+local_settings.py
 
-# IDE / Editor
-.idea/
-*.iml
+# =========================
+# IDEs / editors
+# =========================
+# VSCode
 .vscode/
-*.sublime-project
-*.sublime-workspace
+.history/
+*.code-workspace
 
-# Environment variables
-.env
-.env.*
+# PyCharm / JetBrains
+.idea/
 
-# macOS
+# =========================
+# OS generated files
+# =========================
 .DS_Store
-.AppleDouble
-.LSOverride
+Thumbs.db
+desktop.ini
+*.swp
 
-# Python virtual environment
-env/
-venv/
-ENV/
-myenv/
+# =========================
+# Environment variables / keys
+# =========================
+.env
+.env.local
+.env.*.local
+keys/
+*.key
+*.pem
+*.json  # If these are your service accounts, like Earth Engine keys
 
-# Conda environments
-*.conda
-*.condarc
-.conda/
-conda-meta/
-envs/
+# =========================
+# Docker
+# =========================
+*.dockerfile
+docker-compose.override.yml
+.docker/
+
+# Ignore Google Earth Engine service account key
+keys/croppulseafrica-637fb864acc7.json
