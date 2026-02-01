@@ -1,0 +1,72 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# C extensions
+*.so
+
+# Distribution / packaging
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# Django stuff
+*.log
+*.pot
+*.pyc
+*.pyo
+*.sqlite3
+*.sqlite
+db.sqlite3
+db.sqlite3-journal
+
+# Django migrations (keep the .py files, ignore __pycache__)
+apps/**/migrations/__pycache__/
+apps/**/migrations/*.pyc
+
+# Media and static files
+media/
+staticfiles/
+static/
+
+# IDE / Editor
+.idea/
+*.iml
+.vscode/
+*.sublime-project
+*.sublime-workspace
+
+# Environment variables
+.env
+.env.*
+
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# Python virtual environment
+env/
+venv/
+ENV/
+myenv/
+
+# Conda environments
+*.conda
+*.condarc
+.conda/
+conda-meta/
+envs/
