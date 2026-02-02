@@ -68,3 +68,5 @@ class DeforestationCheck(models.Model):
 
     class Meta:
         db_table = 'deforestation_checks'
+
+# UPDATE: Add blockchain hash, QR data

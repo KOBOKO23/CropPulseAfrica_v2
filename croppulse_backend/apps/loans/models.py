@@ -68,3 +68,5 @@ class LoanRepayment(models.Model):
     class Meta:
         db_table = 'loan_repayments'
         unique_together = ['loan', 'payment_number']
+
+# UPDATE: Add repayment schedule, restructure

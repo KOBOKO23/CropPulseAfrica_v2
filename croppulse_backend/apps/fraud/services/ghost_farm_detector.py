@@ -1,0 +1,1 @@
+# No crops detected on satellite imagery for claimed farm area

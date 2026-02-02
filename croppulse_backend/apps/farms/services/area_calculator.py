@@ -1,0 +1,1 @@
+# Accurate acreage calculation for farm boundaries using GeoDjango

@@ -65,3 +65,5 @@ class NDVIHistory(models.Model):
         indexes = [
             models.Index(fields=['farm', '-date']),
         ]
+
+    # update: Add scan status, cloud cover, and SAR penetration fields to SatelliteScan model

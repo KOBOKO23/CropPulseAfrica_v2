@@ -56,3 +56,6 @@ class VoiceRegistration(models.Model):
 
     class Meta:
         db_table = 'voice_registrations'
+
+
+# update farmers/models.py to add fraud_status field to Farmer model

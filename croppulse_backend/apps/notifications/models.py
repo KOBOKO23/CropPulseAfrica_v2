@@ -33,3 +33,5 @@ class Notification(models.Model):
         indexes = [
             models.Index(fields=['user', '-created_at']),
         ]
+
+# UPDATE: Add notofication type, priority

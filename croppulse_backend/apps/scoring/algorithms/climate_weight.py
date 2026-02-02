@@ -1,0 +1,1 @@
+# Climate risk score weighting algorithm

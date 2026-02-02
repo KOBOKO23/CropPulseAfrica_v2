@@ -1,0 +1,1 @@
+# Cache satellite images to improve performance and reduce redundant downloads.

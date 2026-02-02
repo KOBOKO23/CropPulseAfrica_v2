@@ -1,0 +1,1 @@
+# SMS sender integration for Africa's Talking

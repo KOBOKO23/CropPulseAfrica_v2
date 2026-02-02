@@ -1,0 +1,1 @@
+# NDVI/Crop health weighting algorithm

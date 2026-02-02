@@ -57,3 +57,5 @@ class ScoreHistory(models.Model):
     class Meta:
         db_table = 'score_history'
         unique_together = ['farmer', 'date']
+
+# UPDATE: Add score history, breakdown

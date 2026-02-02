@@ -1,0 +1,1 @@
+# Auto approve based on scores

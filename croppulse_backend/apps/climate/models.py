@@ -66,3 +66,5 @@ class ClimateRiskAssessment(models.Model):
         indexes = [
             models.Index(fields=['farm', '-assessment_date']),
         ]
+
+# UPDATE: Add alert triggering mechanism based on risk thresholds

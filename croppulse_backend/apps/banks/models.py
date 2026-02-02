@@ -26,3 +26,5 @@ class Bank(models.Model):
 
     class Meta:
         db_table = 'banks'
+
+# UPDATE: Add API keys, webhooks, billing
