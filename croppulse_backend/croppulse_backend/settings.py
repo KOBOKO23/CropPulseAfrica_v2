@@ -9,6 +9,8 @@ https://docs.djangoproject.com/en/5.2/topics/settings/
 from pathlib import Path
 from datetime import timedelta
 import environ
+import os
+
 
 # Initialize environment variables
 env = environ.Env(
@@ -42,6 +44,7 @@ INSTALLED_APPS = [
     'django.contrib.sessions',
     'django.contrib.messages',
     'django.contrib.staticfiles',
+    'django.contrib.gis',
     # Third-party apps
     'rest_framework',
     'rest_framework_simplejwt',
@@ -96,10 +99,10 @@ DATABASES = {
     'default': {
         'ENGINE': 'django.contrib.gis.db.backends.postgis',
         'NAME': 'croppulse',
-        'USER': 'croppulse_user',
+        'USER': 'koboko',
         'PASSWORD': 'KphiL2022*',
         'HOST': 'localhost',
-        'PORT': '5433',
+        'PORT': '5432',
     }
 }
 
@@ -125,7 +128,9 @@ USE_TZ = True
 # ----------------------------------------------------------------------
 # Static files
 # ----------------------------------------------------------------------
+BASE_DIR = Path(__file__).resolve().parent.parent
 STATIC_URL = 'static/'
+STATIC_ROOT = os.path.join(BASE_DIR, 'staticfiles')
 
 # ----------------------------------------------------------------------
 # Default primary key field type
@@ -146,6 +151,13 @@ REST_FRAMEWORK = {
     'DEFAULT_PAGINATION_CLASS': 'rest_framework.pagination.PageNumberPagination',
     'PAGE_SIZE': 20,
 }
+
+
+MEDIA_URL = '/media/'
+MEDIA_ROOT = BASE_DIR / 'media'
+
+os.makedirs(MEDIA_ROOT / 'farmer_photos', exist_ok=True)
+os.makedirs(MEDIA_ROOT / 'farmer_voice_recordings', exist_ok=True)
 
 # ----------------------------------------------------------------------
 # Simple JWT Settings

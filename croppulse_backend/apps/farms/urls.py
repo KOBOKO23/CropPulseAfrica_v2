@@ -1,0 +1,47 @@
+# apps/farms/urls.py
+
+from django.urls import path
+from .views import (
+    FarmCreateView,
+    FarmListView,
+    FarmDetailView,
+    FarmUpdateView,
+    FarmBoundaryPointsView,
+    FarmerFarmsView,
+    NearbyFarmsView,
+    FarmsInAreaView,
+    farm_geojson,
+    trigger_farm_scan,
+    farm_statistics,
+    delete_farm,
+    set_primary_farm
+)
+
+app_name = 'farms'
+
+urlpatterns = [
+    # Farm CRUD
+    path('create/', FarmCreateView.as_view(), name='farm_create'),
+    path('', FarmListView.as_view(), name='farm_list'),
+    path('<str:farm_id>/', FarmDetailView.as_view(), name='farm_detail'),
+    path('<str:farm_id>/update/', FarmUpdateView.as_view(), name='farm_update'),
+    path('<str:farm_id>/delete/', delete_farm, name='farm_delete'),
+    
+    # Farm Actions
+    path('<str:farm_id>/scan/', trigger_farm_scan, name='trigger_scan'),
+    path('<str:farm_id>/set-primary/', set_primary_farm, name='set_primary'),
+    path('<str:farm_id>/geojson/', farm_geojson, name='farm_geojson'),
+    
+    # Boundary Points
+    path('<str:farm_id>/boundary-points/', FarmBoundaryPointsView.as_view(), name='boundary_points'),
+    
+    # Farmer Farms
+    path('farmer/<str:pulse_id>/', FarmerFarmsView.as_view(), name='farmer_farms'),
+    
+    # Spatial Queries
+    path('<str:farm_id>/nearby/', NearbyFarmsView.as_view(), name='nearby_farms'),
+    path('in-area/', FarmsInAreaView.as_view(), name='farms_in_area'),
+    
+    # Statistics
+    path('statistics/', farm_statistics, name='farm_statistics'),
+]
