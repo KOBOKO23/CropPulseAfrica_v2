@@ -169,21 +169,7 @@ This backend is built for **real-world constraints**, not demos.
 
 ## 📄 License
 
-MIT (or specify)
+CropPulse Africa Team
 
 ---
-
-## Final verdict 🏁
-
-**Technically:** strong
-**Architecturally:** impressive
-**Impact:** very high
-**Competition-ready:** yes — with the right story
-
-If you want, next we can:
-
-* Tighten this README for a *specific competition*
-* Create a **1-page architecture diagram**
-* Prepare a **judge-friendly demo flow**
-* Or write the **pitch deck narrative**
 
