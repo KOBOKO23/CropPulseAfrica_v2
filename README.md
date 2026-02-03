@@ -66,6 +66,8 @@ AI-powered agricultural credit verification and risk intelligence platform.
 * **Auth & Security:** API keys, rate limiting, tenant isolation
 * **Deployment:** Docker & Docker Compose
 
+![CropPulse Architecture](croppulse_backend/docs/images/cpa4.jpeg)
+
 ```
 apps/
 ├── climate        # Weather, climate risk, alerts
