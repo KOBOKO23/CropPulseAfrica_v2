@@ -157,12 +157,12 @@ Includes:
 ---
 
 ## 🏆 Why CropPulse?
+![CropPulse Architecture](croppulse_backend/docs/images/cpa3.jpeg)
 
 CropPulse bridges the gap between **climate data, finance, and compliance**, enabling institutions to safely operate in regions where traditional data is unreliable or unavailable.
 
 This backend is built for **real-world constraints**, not demos.
 
-![CropPulse Architecture](croppulse_backend/docs/images/cpa3.jpeg)
 
 
 ---
