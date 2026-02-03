@@ -53,6 +53,7 @@ INSTALLED_APPS = [
     'apps.farmers.apps.FarmersConfig',
     'apps.farms.apps.FarmsConfig',
     'apps.satellite.apps.SatelliteConfig',
+    'apps.banks.apps.BanksConfig',
 ]
 
 # ----------------------------------------------------------------------
