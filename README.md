@@ -10,6 +10,9 @@ AI-powered agricultural credit verification and risk intelligence platform.
 
 ## ✨ Key Features
 
+![CropPulse Architecture](croppulse_backend/docs/images/cpa2.jpeg)
+
+
 ### 🌦 Climate & Satellite Intelligence
 
 * Weather forecasting and historical climate analysis
@@ -158,6 +161,9 @@ Includes:
 CropPulse bridges the gap between **climate data, finance, and compliance**, enabling institutions to safely operate in regions where traditional data is unreliable or unavailable.
 
 This backend is built for **real-world constraints**, not demos.
+
+![CropPulse Architecture](croppulse_backend/docs/images/cpa3.jpeg)
+
 
 ---
 
