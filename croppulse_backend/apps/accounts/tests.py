@@ -423,3 +423,108 @@ class UserStatisticsAPITestCase(APITestCase):
         response = self.client.get(self.stats_url)
         
         self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
+
+class UserManagerTestCase(TestCase):
+    """Test cases for custom User manager"""
+    
+    def test_normalize_phone_number(self):
+        """Test phone number normalization"""
+        from apps.accounts.models import User
+        
+        # Test different formats
+        user1 = User.objects.create_user(
+            username='test1',
+            email='test1@test.com',
+            phone_number='0712345678',
+            password='Pass123!'
+        )
+        self.assertEqual(user1.phone_number, '+254712345678')
+        
+        user2 = User.objects.create_user(
+            username='test2',
+            email='test2@test.com',
+            phone_number='254723456789',
+            password='Pass123!'
+        )
+        self.assertEqual(user2.phone_number, '+254723456789')
+    
+    def test_get_farmers(self):
+        """Test getting farmers"""
+        from apps.accounts.models import User
+        
+        User.objects.create_user(
+            username='farmer1',
+            email='f1@test.com',
+            phone_number='+254711111111',
+            password='Pass123!',
+            user_type='farmer'
+        )
+        
+        User.objects.create_user(
+            username='bank1',
+            email='b1@test.com',
+            phone_number='+254722222222',
+            password='Pass123!',
+            user_type='bank'
+        )
+        
+        farmers = User.objects.get_farmers()
+        self.assertEqual(farmers.count(), 1)
+        self.assertEqual(farmers.first().user_type, 'farmer')
+
+
+class AuditLogTestCase(TestCase):
+    """Test cases for Audit Log"""
+    
+    def setUp(self):
+        """Set up test user"""
+        from apps.accounts.models import User
+        
+        self.user = User.objects.create_user(
+            username='testuser',
+            email='test@test.com',
+            phone_number='+254700000000',
+            password='Pass123!',
+            user_type='farmer'
+        )
+    
+    def test_create_audit_log(self):
+        """Test creating audit log"""
+        from apps.accounts.services import AuthService
+        
+        AuthService.create_audit_log(
+            user=self.user,
+            action='login',
+            ip_address='127.0.0.1',
+            metadata={'test': 'data'}
+        )
+        
+        from apps.accounts.models import AuditLog
+        logs = AuditLog.objects.filter(user=self.user)
+        
+        self.assertEqual(logs.count(), 1)
+        self.assertEqual(logs.first().action, 'login')
+        self.assertEqual(logs.first().ip_address, '127.0.0.1')
+
+
+class PasswordStrengthTestCase(APITestCase):
+    """Test password strength checker"""
+    
+    def test_weak_password(self):
+        """Test weak password detection"""
+        from apps.accounts.services import AuthService
+        
+        result = AuthService.check_password_strength('weak')
+        
+        self.assertEqual(result['strength'], 'weak')
+        self.assertLess(result['score'], 3)
+        self.assertGreater(len(result['feedback']), 0)
+    
+    def test_strong_password(self):
+        """Test strong password detection"""
+        from apps.accounts.services import AuthService
+        
+        result = AuthService.check_password_strength('StrongP@ssw0rd123!')
+        
+        self.assertEqual(result['strength'], 'strong')
+        self.assertGreaterEqual(result['score'], 5)

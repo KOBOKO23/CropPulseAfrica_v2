@@ -3,7 +3,7 @@
 from django.contrib import admin
 from django.contrib.auth.admin import UserAdmin as BaseUserAdmin
 from django.utils.html import format_html
-from .models import User
+from .models import User, AuditLog
 
 
 @admin.register(User)
@@ -15,6 +15,7 @@ class UserAdmin(BaseUserAdmin):
         'email',
         'phone_number',
         'user_type',
+        'language_preference',  # NEW
         'is_verified',
         'is_active',
         'date_joined',
@@ -26,6 +27,8 @@ class UserAdmin(BaseUserAdmin):
         'is_verified',
         'is_active',
         'is_staff',
+        'language_preference',  # NEW
+        'country_code',  # NEW
         'date_joined'
     ]
     
@@ -40,6 +43,7 @@ class UserAdmin(BaseUserAdmin):
     readonly_fields = [
         'date_joined',
         'last_login',
+        'last_activity',  # NEW
         'created_at',
         'updated_at'
     ]
@@ -49,18 +53,38 @@ class UserAdmin(BaseUserAdmin):
             'fields': ('username', 'password')
         }),
         ('Personal Information', {
-            'fields': ('first_name', 'last_name', 'email', 'phone_number')
+            'fields': (
+                'first_name',
+                'last_name',
+                'email',
+                'phone_number',
+                'profile_image',  # NEW
+                'country_code',  # NEW
+                'language_preference'  # NEW
+            )
         }),
         ('User Type & Verification', {
             'fields': ('user_type', 'is_verified'),
             'classes': ('wide',)
         }),
         ('Permissions', {
-            'fields': ('is_active', 'is_staff', 'is_superuser', 'groups', 'user_permissions'),
+            'fields': (
+                'is_active',
+                'is_staff',
+                'is_superuser',
+                'groups',
+                'user_permissions'
+            ),
             'classes': ('collapse',)
         }),
         ('Important Dates', {
-            'fields': ('date_joined', 'last_login', 'created_at', 'updated_at'),
+            'fields': (
+                'date_joined',
+                'last_login',
+                'last_activity',  # NEW
+                'created_at',
+                'updated_at'
+            ),
             'classes': ('collapse',)
         }),
     )
@@ -73,6 +97,7 @@ class UserAdmin(BaseUserAdmin):
                 'email',
                 'phone_number',
                 'user_type',
+                'language_preference',  # NEW
                 'password1',
                 'password2',
                 'is_verified'
@@ -116,11 +141,50 @@ class UserAdmin(BaseUserAdmin):
     deactivate_users.short_description = 'Deactivate selected users'
     
     def get_queryset(self, request):
-        """Optimize queryset with select_related"""
+        """Optimize queryset"""
         qs = super().get_queryset(request)
         return qs.select_related()
+
+
+# NEW: Register AuditLog
+@admin.register(AuditLog)
+class AuditLogAdmin(admin.ModelAdmin):
+    """Admin interface for Audit Logs"""
     
-    class Media:
-        css = {
-            'all': ('admin/css/custom_admin.css',)
-        }
+    list_display = [
+        'user',
+        'action',
+        'ip_address',
+        'timestamp'
+    ]
+    
+    list_filter = [
+        'action',
+        'timestamp'
+    ]
+    
+    search_fields = [
+        'user__username',
+        'user__email',
+        'ip_address',
+        'action'
+    ]
+    
+    readonly_fields = [
+        'user',
+        'action',
+        'ip_address',
+        'user_agent',
+        'metadata',
+        'timestamp'
+    ]
+    
+    ordering = ['-timestamp']
+    
+    def has_add_permission(self, request):
+        """Disable manual creation"""
+        return False
+    
+    def has_change_permission(self, request, obj=None):
+        """Make logs read-only"""
+        return False

@@ -10,11 +10,16 @@ from .views import (
     VoiceRegistrationCreateView,
     VoiceRegistrationListView,
     FarmerOnboardingStatusView,
+    FarmerNoteCreateView,
+    FarmerNoteListView,
     complete_onboarding,
     farmer_statistics,
     search_farmers,
     deactivate_farmer,
-    verify_pulse_id
+    verify_pulse_id,
+    flag_farmer_for_fraud,
+    clear_farmer_fraud_flag,
+    get_farmer_stats_detailed
 )
 
 app_name = 'farmers'
@@ -27,6 +32,7 @@ urlpatterns = [
     path('<str:pulse_id>/', FarmerDetailView.as_view(), name='farmer_detail'),
     path('<str:pulse_id>/update/', FarmerUpdateView.as_view(), name='farmer_update'),
     path('<str:pulse_id>/deactivate/', deactivate_farmer, name='farmer_deactivate'),
+    path('<str:pulse_id>/stats/', get_farmer_stats_detailed, name='farmer_stats_detailed'),
     
     # Voice Registration
     path('voice-registration/', VoiceRegistrationCreateView.as_view(), name='voice_registration_create'),
@@ -36,10 +42,18 @@ urlpatterns = [
     path('<str:pulse_id>/onboarding-status/', FarmerOnboardingStatusView.as_view(), name='onboarding_status'),
     path('<str:pulse_id>/complete-onboarding/', complete_onboarding, name='complete_onboarding'),
     
+    # Farmer Notes
+    path('<str:pulse_id>/notes/', FarmerNoteListView.as_view(), name='farmer_notes'),
+    path('<str:pulse_id>/notes/create/', FarmerNoteCreateView.as_view(), name='farmer_note_create'),
+    
+    # Fraud Management
+    path('<str:pulse_id>/flag-fraud/', flag_farmer_for_fraud, name='flag_fraud'),
+    path('<str:pulse_id>/clear-fraud/', clear_farmer_fraud_flag, name='clear_fraud'),
+    
     # Search & Verification
     path('search/', search_farmers, name='search_farmers'),
     path('verify-pulse-id/<str:pulse_id>/', verify_pulse_id, name='verify_pulse_id'),
     
-    # Statistics
+    # Statistics (Admin)
     path('statistics/', farmer_statistics, name='farmer_statistics'),
 ]

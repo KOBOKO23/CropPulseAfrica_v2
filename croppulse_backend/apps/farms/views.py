@@ -10,6 +10,8 @@ from django.contrib.gis.measure import D
 from django.db.models import Sum, Avg, Count, Q
 from .models import Farm, FarmBoundaryPoint
 from apps.farmers.models import Farmer
+from apps.farms.services import BoundaryService
+from apps.farms.services import AreaCalculator
 from .serializers import (
     FarmSerializer,
     FarmCreateSerializer,
@@ -476,4 +478,164 @@ def set_primary_farm(request, farm_id):
     return Response({
         'message': f'Farm {farm_id} set as primary',
         'farm': FarmSerializer(farm).data
+    }, status=status.HTTP_200_OK)
+
+
+@api_view(['POST'])
+@permission_classes([permissions.IsAuthenticated])
+def validate_boundary(request):
+    """
+    POST /api/v1/farms/validate-boundary/
+    
+    Validate farm boundary before creation
+    """
+    boundary_points = request.data.get('boundary_points')
+    
+    if not boundary_points:
+        return Response({
+            'error': 'boundary_points is required'
+        }, status=status.HTTP_400_BAD_REQUEST)
+    
+    # Validate using service
+    is_valid, errors, warnings = BoundaryService.validate_boundary_points(boundary_points)
+    
+    result = {
+        'is_valid': is_valid,
+        'errors': errors,
+        'warnings': warnings
+    }
+    
+    # If valid, calculate additional info
+    if is_valid:
+        try:
+            polygon = BoundaryService.create_polygon_from_points(boundary_points)
+            area_result = AreaCalculator.calculate_polygon_area(polygon)
+            complexity = AreaCalculator.calculate_shape_complexity(polygon)
+            anomalies = AreaCalculator.detect_anomalies(polygon)
+            
+            result['calculated_area'] = area_result
+            result['shape_complexity'] = complexity
+            result['anomalies'] = anomalies
+        except Exception as e:
+            result['warnings'].append(f"Could not calculate metrics: {str(e)}")
+    
+    from .serializers import BoundaryValidationSerializer
+    serializer = BoundaryValidationSerializer(result)
+    
+    return Response(serializer.data, status=status.HTTP_200_OK)
+
+
+@api_view(['POST'])
+@permission_classes([permissions.IsAuthenticated])
+def check_overlap(request, farm_id):
+    """
+    POST /api/v1/farms/{farm_id}/check-overlap/
+    
+    Check if farm overlaps with other farms
+    """
+    farm = get_object_or_404(Farm, farm_id=farm_id)
+    
+    # Check permissions
+    if request.user.user_type == 'farmer':
+        if farm.farmer.user != request.user:
+            return Response({
+                'error': 'Permission denied'
+            }, status=status.HTTP_403_FORBIDDEN)
+    
+    # Check overlaps
+    overlap_result = BoundaryService.check_boundary_overlap(farm)
+    
+    from .serializers import FarmOverlapCheckSerializer
+    serializer = FarmOverlapCheckSerializer(overlap_result)
+    
+    return Response(serializer.data, status=status.HTTP_200_OK)
+
+
+@api_view(['POST'])
+@permission_classes([permissions.IsAuthenticated])
+def simplify_boundary(request, farm_id):
+    """
+    POST /api/v1/farms/{farm_id}/simplify/
+    
+    Simplify farm boundary to reduce complexity
+    """
+    farm = get_object_or_404(Farm, farm_id=farm_id)
+    
+    # Check permissions
+    if request.user.user_type == 'farmer':
+        if farm.farmer.user != request.user:
+            return Response({
+                'error': 'Permission denied'
+            }, status=status.HTTP_403_FORBIDDEN)
+    
+    tolerance = float(request.data.get('tolerance', 0.0001))
+    
+    if tolerance <= 0 or tolerance > 0.01:
+        return Response({
+            'error': 'Tolerance must be between 0 and 0.01'
+        }, status=status.HTTP_400_BAD_REQUEST)
+    
+    # Simplify boundary
+    simplified = BoundaryService.simplify_boundary(farm.boundary, tolerance)
+    
+    # Calculate new stats
+    original_vertices = len(farm.boundary.coords[0])
+    simplified_vertices = len(simplified.coords[0])
+    reduction = ((original_vertices - simplified_vertices) / original_vertices) * 100
+    
+    return Response({
+        'message': 'Boundary simplified',
+        'original_vertices': original_vertices,
+        'simplified_vertices': simplified_vertices,
+        'reduction_percentage': round(reduction, 2),
+        'simplified_geojson': {
+            'type': 'Polygon',
+            'coordinates': [[
+                [point[0], point[1]] for point in simplified.coords[0]
+            ]]
+        }
+    }, status=status.HTTP_200_OK)
+
+
+@api_view(['GET'])
+@permission_classes([permissions.IsAuthenticated])
+def get_boundary_analysis(request, farm_id):
+    """
+    GET /api/v1/farms/{farm_id}/boundary-analysis/
+    
+    Get detailed boundary analysis
+    """
+    farm = get_object_or_404(Farm, farm_id=farm_id)
+    
+    # Check permissions
+    if request.user.user_type == 'farmer':
+        if farm.farmer.user != request.user:
+            return Response({
+                'error': 'Permission denied'
+            }, status=status.HTTP_403_FORBIDDEN)
+    
+    # Calculate metrics
+    area_result = AreaCalculator.calculate_polygon_area(farm.boundary)
+    complexity = AreaCalculator.calculate_shape_complexity(farm.boundary)
+    perimeter = AreaCalculator.calculate_perimeter(farm.boundary)
+    bbox = AreaCalculator.calculate_bounding_box(farm.boundary)
+    anomalies = AreaCalculator.detect_anomalies(farm.boundary)
+    
+    # Get boundary points accuracy
+    boundary_points = farm.boundary_points.all()
+    accuracy = BoundaryService.calculate_boundary_accuracy(boundary_points)
+    
+    # Check overlaps
+    overlaps = BoundaryService.check_boundary_overlap(farm)
+    
+    return Response({
+        'farm_id': farm_id,
+        'area': area_result,
+        'perimeter_meters': perimeter,
+        'shape_complexity': complexity,
+        'bounding_box': bbox,
+        'vertices_count': len(farm.boundary.coords[0]),
+        'anomalies': anomalies,
+        'boundary_accuracy': accuracy,
+        'overlaps': overlaps
     }, status=status.HTTP_200_OK)

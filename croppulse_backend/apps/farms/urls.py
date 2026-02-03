@@ -14,7 +14,11 @@ from .views import (
     trigger_farm_scan,
     farm_statistics,
     delete_farm,
-    set_primary_farm
+    set_primary_farm,
+    validate_boundary,  # NEW
+    check_overlap,  # NEW
+    simplify_boundary,  # NEW
+    get_boundary_analysis  # NEW
 )
 
 app_name = 'farms'
@@ -31,6 +35,12 @@ urlpatterns = [
     path('<str:farm_id>/scan/', trigger_farm_scan, name='trigger_scan'),
     path('<str:farm_id>/set-primary/', set_primary_farm, name='set_primary'),
     path('<str:farm_id>/geojson/', farm_geojson, name='farm_geojson'),
+    
+    # Boundary Operations (NEW)
+    path('validate-boundary/', validate_boundary, name='validate_boundary'),
+    path('<str:farm_id>/check-overlap/', check_overlap, name='check_overlap'),
+    path('<str:farm_id>/simplify/', simplify_boundary, name='simplify_boundary'),
+    path('<str:farm_id>/boundary-analysis/', get_boundary_analysis, name='boundary_analysis'),
     
     # Boundary Points
     path('<str:farm_id>/boundary-points/', FarmBoundaryPointsView.as_view(), name='boundary_points'),

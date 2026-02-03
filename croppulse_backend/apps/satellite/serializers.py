@@ -24,25 +24,38 @@ class SatelliteScanSerializer(serializers.ModelSerializer):
             'satellite_type',
             'acquisition_date',
             'processing_date',
+            'processing_status',
+            'processing_error',
             'image_url',
             'cloud_cover_percentage',
             'sar_penetrated_clouds',
+            'cloud_mask_url',
+            'clear_pixel_percentage',
             'ndvi',
             'evi',
             'savi',
+            'ndwi',
+            'msavi',
             'soil_moisture',
             'crop_stage',
             'crop_health_status',
+            'vh_backscatter',
+            'vv_backscatter',
+            'vh_vv_ratio',
             'verified_farm_size',
             'matches_declared_size',
+            'size_difference_percentage',
+            'data_quality_score',
+            'resolution_meters',
+            'orbit_direction',
             'raw_satellite_data',
-            'created_at'
+            'created_at',
         ]
         read_only_fields = [
             'id',
             'scan_id',
             'processing_date',
-            'created_at'
+            'created_at',
         ]
 
 
@@ -52,6 +65,7 @@ class SatelliteScanDetailSerializer(serializers.ModelSerializer):
     farm_details = serializers.SerializerMethodField()
     vegetation_indices = serializers.SerializerMethodField()
     health_assessment = serializers.SerializerMethodField()
+    sar_metrics = serializers.SerializerMethodField()
     
     class Meta:
         model = SatelliteScan
@@ -62,14 +76,22 @@ class SatelliteScanDetailSerializer(serializers.ModelSerializer):
             'satellite_type',
             'acquisition_date',
             'processing_date',
+            'processing_status',
             'image_url',
             'cloud_cover_percentage',
             'sar_penetrated_clouds',
+            'cloud_mask_url',
+            'clear_pixel_percentage',
             'vegetation_indices',
+            'sar_metrics',
             'health_assessment',
             'verified_farm_size',
             'matches_declared_size',
-            'created_at'
+            'size_difference_percentage',
+            'data_quality_score',
+            'resolution_meters',
+            'orbit_direction',
+            'created_at',
         ]
     
     def get_farm_details(self, obj):
@@ -82,17 +104,28 @@ class SatelliteScanDetailSerializer(serializers.ModelSerializer):
             'county': obj.farm.county,
             'location': {
                 'latitude': obj.farm.center_point.y if obj.farm.center_point else None,
-                'longitude': obj.farm.center_point.x if obj.farm.center_point else None
-            }
+                'longitude': obj.farm.center_point.x if obj.farm.center_point else None,
+            },
         }
     
     def get_vegetation_indices(self, obj):
-        """Get all vegetation indices"""
+        """Get all vegetation indices including ndwi and msavi"""
         return {
             'ndvi': obj.ndvi,
             'evi': obj.evi,
             'savi': obj.savi,
-            'interpretation': self._interpret_ndvi(obj.ndvi)
+            'ndwi': obj.ndwi,
+            'msavi': obj.msavi,
+            'interpretation': self._interpret_ndvi(obj.ndvi),
+        }
+    
+    def get_sar_metrics(self, obj):
+        """Get SAR-specific metrics"""
+        return {
+            'vh_backscatter': obj.vh_backscatter,
+            'vv_backscatter': obj.vv_backscatter,
+            'vh_vv_ratio': obj.vh_vv_ratio,
+            'orbit_direction': obj.orbit_direction,
         }
     
     def get_health_assessment(self, obj):
@@ -101,7 +134,7 @@ class SatelliteScanDetailSerializer(serializers.ModelSerializer):
             'status': obj.crop_health_status,
             'soil_moisture': obj.soil_moisture,
             'crop_stage': obj.crop_stage,
-            'recommendation': self._get_recommendation(obj)
+            'recommendation': self._get_recommendation(obj),
         }
     
     def _interpret_ndvi(self, ndvi):
@@ -131,6 +164,9 @@ class SatelliteScanDetailSerializer(serializers.ModelSerializer):
         
         if obj.crop_health_status == 'Stressed':
             recommendations.append('Monitor crop closely for pests or disease')
+        
+        if obj.ndwi is not None and obj.ndwi > 0.3:
+            recommendations.append('High water index detected - check for waterlogging')
         
         if not recommendations:
             recommendations.append('Continue current farming practices')
@@ -168,15 +204,16 @@ class SatelliteScanCreateSerializer(serializers.ModelSerializer):
         return {
             'farm_id': farm.farm_id,
             'task_id': task.id,
-            'status': 'Scan queued for processing'
+            'status': 'Scan queued for processing',
         }
 
 
 class NDVIHistorySerializer(serializers.ModelSerializer):
-    """Serializer for NDVI History"""
+    """Serializer for NDVI History — includes all context fields from the model"""
     
     farm_id = serializers.CharField(source='farm.farm_id', read_only=True)
     scan_id = serializers.CharField(source='satellite_scan.scan_id', read_only=True, allow_null=True)
+    trend_indicator = serializers.SerializerMethodField()
     
     class Meta:
         model = NDVIHistory
@@ -186,11 +223,21 @@ class NDVIHistorySerializer(serializers.ModelSerializer):
             'farm_id',
             'date',
             'ndvi_value',
+            'evi_value',
+            'savi_value',
+            'soil_moisture',
+            'temperature',
+            'rainfall_mm',
             'satellite_scan',
             'scan_id',
-            'created_at'
+            'trend_indicator',
+            'created_at',
         ]
         read_only_fields = ['id', 'created_at']
+    
+    def get_trend_indicator(self, obj):
+        """Expose the model helper as a read-only computed field"""
+        return obj.get_trend_indicator()
 
 
 class NDVITrendSerializer(serializers.Serializer):
@@ -224,7 +271,7 @@ class BulkScanRequestSerializer(serializers.Serializer):
     farm_ids = serializers.ListField(
         child=serializers.CharField(),
         min_length=1,
-        max_length=50
+        max_length=50,
     )
     
     def validate_farm_ids(self, value):
@@ -248,7 +295,7 @@ class SatelliteStatusSerializer(serializers.Serializer):
         ('queued', 'Queued'),
         ('processing', 'Processing'),
         ('completed', 'Completed'),
-        ('failed', 'Failed')
+        ('failed', 'Failed'),
     ])
     progress = serializers.IntegerField(min_value=0, max_value=100)
     message = serializers.CharField()

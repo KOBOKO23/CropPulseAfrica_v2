@@ -19,23 +19,24 @@ class SatelliteScanAdmin(admin.ModelAdmin):
         'ndvi_display',
         'cloud_cover_badge',
         'size_verification_badge',
-        'processing_date'
+        'processing_date',
     ]
     
     list_filter = [
         'satellite_type',
         'crop_health_status',
+        'processing_status',
         'sar_penetrated_clouds',
         'matches_declared_size',
         'acquisition_date',
-        'processing_date'
+        'processing_date',
     ]
     
     search_fields = [
         'scan_id',
         'farm__farm_id',
         'farm__farmer__pulse_id',
-        'farm__farmer__full_name'
+        'farm__farmer__full_name',
     ]
     
     readonly_fields = [
@@ -43,29 +44,35 @@ class SatelliteScanAdmin(admin.ModelAdmin):
         'processing_date',
         'created_at',
         'image_preview',
-        'detailed_metrics'
+        'detailed_metrics',
     ]
     
     fieldsets = (
         ('Scan Information', {
-            'fields': ('scan_id', 'farm', 'satellite_type', 'acquisition_date', 'processing_date')
+            'fields': ('scan_id', 'farm', 'satellite_type', 'acquisition_date', 'processing_date', 'processing_status', 'processing_error'),
         }),
         ('Imagery Data', {
-            'fields': ('image_url', 'image_preview', 'cloud_cover_percentage', 'sar_penetrated_clouds')
+            'fields': ('image_url', 'image_preview', 'cloud_cover_percentage', 'sar_penetrated_clouds', 'cloud_mask_url', 'clear_pixel_percentage'),
         }),
         ('Vegetation Indices', {
-            'fields': ('ndvi', 'evi', 'savi'),
-            'classes': ('wide',)
+            'fields': ('ndvi', 'evi', 'savi', 'ndwi', 'msavi'),
+            'classes': ('wide',),
         }),
         ('Soil & Crop Analysis', {
-            'fields': ('soil_moisture', 'crop_stage', 'crop_health_status')
+            'fields': ('soil_moisture', 'crop_stage', 'crop_health_status'),
+        }),
+        ('SAR Metrics', {
+            'fields': ('vh_backscatter', 'vv_backscatter', 'vh_vv_ratio', 'orbit_direction'),
         }),
         ('Verification', {
-            'fields': ('verified_farm_size', 'matches_declared_size')
+            'fields': ('verified_farm_size', 'matches_declared_size', 'size_difference_percentage'),
+        }),
+        ('Quality & Metadata', {
+            'fields': ('data_quality_score', 'resolution_meters'),
         }),
         ('Raw Data', {
             'fields': ('raw_satellite_data', 'detailed_metrics'),
-            'classes': ('collapse',)
+            'classes': ('collapse',),
         }),
     )
     
@@ -84,13 +91,14 @@ class SatelliteScanAdmin(admin.ModelAdmin):
         colors = {
             'Healthy': '#10b981',
             'Stressed': '#f59e0b',
-            'Poor': '#ef4444'
+            'Poor': '#ef4444',
+            'Unknown': '#6b7280',
         }
         color = colors.get(obj.crop_health_status, '#6b7280')
         return format_html(
             '<span style="background-color: {}; color: white; padding: 3px 10px; '
             'border-radius: 12px; font-size: 11px; font-weight: bold;">{}</span>',
-            color, obj.crop_health_status
+            color, obj.crop_health_status,
         )
     health_badge.short_description = 'Crop Health'
     
@@ -111,7 +119,7 @@ class SatelliteScanAdmin(admin.ModelAdmin):
         
         return format_html(
             '<span style="color: {}; font-weight: bold;">{:.3f}</span>',
-            color, obj.ndvi
+            color, obj.ndvi,
         )
     ndvi_display.short_description = 'NDVI'
     
@@ -131,7 +139,7 @@ class SatelliteScanAdmin(admin.ModelAdmin):
         
         return format_html(
             '<span style="color: {};">{} {:.1f}%{}</span>',
-            color, icon, obj.cloud_cover_percentage, sar_text
+            color, icon, obj.cloud_cover_percentage, sar_text,
         )
     cloud_cover_badge.short_description = 'Cloud Cover'
     
@@ -151,29 +159,58 @@ class SatelliteScanAdmin(admin.ModelAdmin):
         if obj.image_url:
             return format_html(
                 '<img src="{}" style="max-width: 400px; border-radius: 8px;" />',
-                obj.image_url
+                obj.image_url,
             )
         return 'No image available'
     image_preview.short_description = 'Satellite Image'
     
     def detailed_metrics(self, obj):
-        """Display detailed metrics in formatted way"""
-        html = '<div style="font-family: monospace; background: #f3f4f6; padding: 15px; border-radius: 8px;">'
+        """
+        Display detailed metrics in a formatted box.
         
+        All dynamic values are passed as arguments to format_html so that Django's
+        auto-escaping protects against XSS — no f-string / .format() interpolation
+        of user-controlled data into the HTML template.
+        """
+        # Build up a list of (label, value) rows; skip None values
+        rows = []
         if obj.ndvi is not None:
-            html += f'<p><strong>NDVI:</strong> {obj.ndvi:.3f}</p>'
+            rows.append(('NDVI', f'{obj.ndvi:.3f}'))
         if obj.evi is not None:
-            html += f'<p><strong>EVI:</strong> {obj.evi:.3f}</p>'
+            rows.append(('EVI', f'{obj.evi:.3f}'))
         if obj.savi is not None:
-            html += f'<p><strong>SAVI:</strong> {obj.savi:.3f}</p>'
+            rows.append(('SAVI', f'{obj.savi:.3f}'))
+        if obj.ndwi is not None:
+            rows.append(('NDWI', f'{obj.ndwi:.3f}'))
+        if obj.msavi is not None:
+            rows.append(('MSAVI', f'{obj.msavi:.3f}'))
         if obj.soil_moisture is not None:
-            html += f'<p><strong>Soil Moisture:</strong> {obj.soil_moisture:.1f}%</p>'
+            rows.append(('Soil Moisture', f'{obj.soil_moisture:.1f}%'))
+        if obj.vh_backscatter is not None:
+            rows.append(('VH Backscatter', f'{obj.vh_backscatter:.2f} dB'))
+        if obj.vv_backscatter is not None:
+            rows.append(('VV Backscatter', f'{obj.vv_backscatter:.2f} dB'))
+        if obj.data_quality_score is not None:
+            rows.append(('Data Quality Score', str(obj.data_quality_score)))
+        rows.append(('Verified Size', f'{obj.verified_farm_size} acres'))
+        rows.append(('Crop Stage', obj.crop_stage or 'Unknown'))
+        rows.append(('Processing Status', obj.processing_status))
         
-        html += f'<p><strong>Verified Size:</strong> {obj.verified_farm_size} acres</p>'
-        html += f'<p><strong>Crop Stage:</strong> {obj.crop_stage or "Unknown"}</p>'
-        html += '</div>'
+        # Build each <p> safely
+        row_html_parts = []
+        for label, value in rows:
+            row_html_parts.append(
+                format_html('<p><strong>{}</strong>: {}</p>', label, value)
+            )
         
-        return format_html(html)
+        # Join the pre-escaped parts — mark_safe is not needed because
+        # format_html already returns a SafeString; concatenation preserves safety.
+        inner_html = ''.join(row_html_parts)
+        
+        return format_html(
+            '<div style="font-family: monospace; background: #f3f4f6; padding: 15px; border-radius: 8px;">{}</div>',
+            inner_html,
+        )
     detailed_metrics.short_description = 'Metrics Summary'
     
     actions = ['trigger_rescan', 'mark_as_verified', 'export_to_csv']
@@ -207,7 +244,12 @@ class SatelliteScanAdmin(admin.ModelAdmin):
         writer = csv.writer(response)
         writer.writerow([
             'Scan ID', 'Farm ID', 'Satellite Type', 'Acquisition Date',
-            'NDVI', 'Cloud Cover', 'Crop Health', 'Verified Size', 'Matches Size'
+            'NDVI', 'EVI', 'SAVI', 'NDWI', 'MSAVI',
+            'Cloud Cover', 'Clear Pixel %',
+            'VH Backscatter', 'VV Backscatter', 'VH/VV Ratio',
+            'Soil Moisture', 'Crop Health', 'Crop Stage',
+            'Verified Size', 'Matches Size', 'Size Diff %',
+            'Data Quality Score', 'Processing Status',
         ])
         
         for scan in queryset:
@@ -217,10 +259,23 @@ class SatelliteScanAdmin(admin.ModelAdmin):
                 scan.satellite_type,
                 scan.acquisition_date,
                 scan.ndvi,
+                scan.evi,
+                scan.savi,
+                scan.ndwi,
+                scan.msavi,
                 scan.cloud_cover_percentage,
+                scan.clear_pixel_percentage,
+                scan.vh_backscatter,
+                scan.vv_backscatter,
+                scan.vh_vv_ratio,
+                scan.soil_moisture,
                 scan.crop_health_status,
+                scan.crop_stage,
                 scan.verified_farm_size,
-                scan.matches_declared_size
+                scan.matches_declared_size,
+                scan.size_difference_percentage,
+                scan.data_quality_score,
+                scan.processing_status,
             ])
         
         return response
@@ -241,18 +296,19 @@ class NDVIHistoryAdmin(admin.ModelAdmin):
         'date',
         'ndvi_display',
         'trend_indicator',
-        'created_at'
+        'soil_moisture_display',
+        'created_at',
     ]
     
     list_filter = [
         'date',
-        'created_at'
+        'created_at',
     ]
     
     search_fields = [
         'farm__farm_id',
         'farm__farmer__pulse_id',
-        'farm__farmer__full_name'
+        'farm__farmer__full_name',
     ]
     
     readonly_fields = ['created_at']
@@ -280,7 +336,7 @@ class NDVIHistoryAdmin(admin.ModelAdmin):
         
         return format_html(
             '<span style="color: {}; font-weight: bold;">{:.3f}</span>',
-            color, obj.ndvi_value
+            color, obj.ndvi_value,
         )
     ndvi_display.short_description = 'NDVI Value'
     
@@ -288,7 +344,7 @@ class NDVIHistoryAdmin(admin.ModelAdmin):
         """Show trend compared to previous reading"""
         previous = NDVIHistory.objects.filter(
             farm=obj.farm,
-            date__lt=obj.date
+            date__lt=obj.date,
         ).order_by('-date').first()
         
         if not previous:
@@ -303,6 +359,24 @@ class NDVIHistoryAdmin(admin.ModelAdmin):
         else:
             return format_html('<span style="color: #f59e0b;">→ {:.3f}</span>', diff)
     trend_indicator.short_description = 'Trend'
+    
+    def soil_moisture_display(self, obj):
+        """Display soil moisture if available"""
+        if obj.soil_moisture is None:
+            return format_html('<span style="color: #9ca3af;">—</span>')
+        
+        if obj.soil_moisture >= 60:
+            color = '#10b981'
+        elif obj.soil_moisture >= 40:
+            color = '#f59e0b'
+        else:
+            color = '#ef4444'
+        
+        return format_html(
+            '<span style="color: {};">{:.1f}%</span>',
+            color, obj.soil_moisture,
+        )
+    soil_moisture_display.short_description = 'Soil Moisture'
     
     def get_queryset(self, request):
         """Optimize queryset"""

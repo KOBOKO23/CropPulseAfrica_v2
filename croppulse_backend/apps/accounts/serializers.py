@@ -3,7 +3,7 @@
 from rest_framework import serializers
 from django.contrib.auth import authenticate
 from django.contrib.auth.password_validation import validate_password
-from .models import User
+from .models import User, AuditLog
 
 
 class UserSerializer(serializers.ModelSerializer):
@@ -19,9 +19,15 @@ class UserSerializer(serializers.ModelSerializer):
             'first_name',
             'last_name',
             'user_type',
+            'profile_image',
+            'country_code',
+            'language_preference',
             'is_verified',
             'is_active',
             'date_joined',
+            'last_login',
+            'last_activity',
+            'days_since_joined',
             'created_at',
             'updated_at'
         ]
@@ -32,6 +38,10 @@ class UserSerializer(serializers.ModelSerializer):
             'created_at',
             'updated_at'
         ]
+
+    def get_full_name(self, obj):
+        """Get user's full name"""
+        return obj.get_full_name()
 
 
 class UserRegistrationSerializer(serializers.ModelSerializer):
@@ -329,3 +339,24 @@ class UserDetailSerializer(serializers.ModelSerializer):
         from django.utils import timezone
         delta = timezone.now() - obj.date_joined
         return delta.days
+    
+class AuditLogSerializer(serializers.ModelSerializer):
+    """Serializer for Audit Logs"""
+    
+    user_username = serializers.CharField(source='user.username', read_only=True)
+    action_display = serializers.CharField(source='get_action_display', read_only=True)
+    
+    class Meta:
+        model = AuditLog
+        fields = [
+            'id',
+            'user',
+            'user_username',
+            'action',
+            'action_display',
+            'ip_address',
+            'user_agent',
+            'metadata',
+            'timestamp'
+        ]
+        read_only_fields = fields

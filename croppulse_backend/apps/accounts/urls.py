@@ -12,9 +12,11 @@ from .views import (
     SendVerificationCodeView,
     UserListView,
     UserDetailView,
+    AuditLogListView,  # NEW
     check_auth_status,
     deactivate_account,
-    user_statistics
+    user_statistics,
+    check_password_strength  # NEW
 )
 
 app_name = 'accounts'
@@ -30,6 +32,7 @@ urlpatterns = [
     # User Profile
     path('profile/', UserProfileView.as_view(), name='user_profile'),
     path('password/change/', PasswordChangeView.as_view(), name='password_change'),
+    path('password/strength/', check_password_strength, name='password_strength'),  # NEW
     path('deactivate/', deactivate_account, name='deactivate_account'),
     
     # Phone Verification
@@ -40,4 +43,7 @@ urlpatterns = [
     path('users/', UserListView.as_view(), name='user_list'),
     path('users/<int:id>/', UserDetailView.as_view(), name='user_detail'),
     path('statistics/', user_statistics, name='user_statistics'),
+    
+    # Audit Logs  # NEW
+    path('audit-logs/', AuditLogListView.as_view(), name='audit_logs'),
 ]

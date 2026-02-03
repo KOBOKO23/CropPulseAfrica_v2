@@ -2,9 +2,11 @@
 
 from rest_framework import serializers
 from django.utils import timezone
-from .models import Farmer, VoiceRegistration
+from decimal import Decimal
+from .models import Farmer, VoiceRegistration, FarmerNote
 from apps.accounts.models import User
 from apps.accounts.serializers import UserSerializer
+from .services import PulseIDGenerator, FarmerProfileService
 
 
 class FarmerSerializer(serializers.ModelSerializer):
@@ -13,6 +15,8 @@ class FarmerSerializer(serializers.ModelSerializer):
     phone_number = serializers.CharField(source='user.phone_number', read_only=True)
     email = serializers.CharField(source='user.email', read_only=True)
     is_verified = serializers.BooleanField(source='user.is_verified', read_only=True)
+    total_farm_size = serializers.SerializerMethodField()
+    full_location = serializers.SerializerMethodField()
     
     class Meta:
         model = Farmer
@@ -25,19 +29,41 @@ class FarmerSerializer(serializers.ModelSerializer):
             'county',
             'sub_county',
             'nearest_town',
+            'full_location',
+            'latitude',
+            'longitude',
             'years_farming',
             'primary_crop',
             'secondary_crops',
+            'farming_method',
+            'irrigation_access',
             'photo',
             'phone_number',
             'email',
             'is_verified',
+            'fraud_status',
             'onboarding_completed',
             'is_active',
+            'total_farm_size',
+            'preferred_language',
             'created_at',
             'updated_at'
         ]
-        read_only_fields = ['id', 'pulse_id', 'created_at', 'updated_at']
+        read_only_fields = [
+            'id',
+            'pulse_id',
+            'fraud_status',
+            'created_at',
+            'updated_at'
+        ]
+    
+    def get_total_farm_size(self, obj):
+        """Get total farm size"""
+        return float(obj.get_total_farm_size())
+    
+    def get_full_location(self, obj):
+        """Get full location string"""
+        return obj.get_full_location()
 
 
 class FarmerCreateSerializer(serializers.ModelSerializer):
@@ -52,10 +78,16 @@ class FarmerCreateSerializer(serializers.ModelSerializer):
             'county',
             'sub_county',
             'nearest_town',
+            'latitude',
+            'longitude',
             'years_farming',
             'primary_crop',
             'secondary_crops',
-            'photo'
+            'farming_method',
+            'irrigation_access',
+            'photo',
+            'preferred_language',
+            'referral_source'
         ]
     
     def validate_id_number(self, value):
@@ -71,11 +103,11 @@ class FarmerCreateSerializer(serializers.ModelSerializer):
         if value < 0:
             raise serializers.ValidationError("Years farming cannot be negative.")
         if value > 80:
-            raise serializers.ValidationError("Years farming seems unrealistic.")
+            raise serializers.ValidationError("Years farming seems unrealistic (max 80).")
         return value
     
     def validate_county(self, value):
-        """Validate county is in Kenya"""
+        """Validate county is recognized"""
         kenyan_counties = [
             'Baringo', 'Bomet', 'Bungoma', 'Busia', 'Elgeyo-Marakwet',
             'Embu', 'Garissa', 'Homa Bay', 'Isiolo', 'Kajiado', 'Kakamega',
@@ -88,52 +120,41 @@ class FarmerCreateSerializer(serializers.ModelSerializer):
             'Vihiga', 'Wajir', 'West Pokot'
         ]
         
-        if value.title() not in kenyan_counties:
+        value_title = value.strip().title()
+        if value_title not in kenyan_counties:
             raise serializers.ValidationError(
                 f"'{value}' is not a recognized Kenyan county."
             )
         
-        return value.title()
+        return value_title
+    
+    def validate_latitude(self, value):
+        """Validate latitude range"""
+        if value and (value < -5 or value > 5):
+            raise serializers.ValidationError(
+                "Latitude must be within Kenya's range (-5 to 5)"
+            )
+        return value
+    
+    def validate_longitude(self, value):
+        """Validate longitude range"""
+        if value and (value < 33 or value > 42):
+            raise serializers.ValidationError(
+                "Longitude must be within Kenya's range (33 to 42)"
+            )
+        return value
     
     def create(self, validated_data):
-        """Create farmer profile"""
+        """Create farmer profile using service"""
         user = self.context.get('user')
         
         if not user:
             raise serializers.ValidationError("User is required")
         
-        # Check if user already has a farmer profile
-        if hasattr(user, 'farmer_profile'):
-            raise serializers.ValidationError(
-                "This user already has a farmer profile"
-            )
-        
-        # Generate Pulse ID
-        pulse_id = self._generate_pulse_id(validated_data['county'])
-        
-        # Create farmer
-        farmer = Farmer.objects.create(
-            user=user,
-            pulse_id=pulse_id,
-            **validated_data
-        )
+        # Use service to create farmer
+        farmer = FarmerProfileService.create_farmer_profile(user, validated_data)
         
         return farmer
-    
-    def _generate_pulse_id(self, county):
-        """Generate unique Pulse ID: CP-XXX-CC"""
-        import random
-        
-        # Get county code (first 2 letters)
-        county_code = county[:2].upper()
-        
-        # Generate unique number
-        while True:
-            number = random.randint(100, 999)
-            pulse_id = f"CP-{number}-{county_code}"
-            
-            if not Farmer.objects.filter(pulse_id=pulse_id).exists():
-                return pulse_id
 
 
 class FarmerUpdateSerializer(serializers.ModelSerializer):
@@ -147,11 +168,24 @@ class FarmerUpdateSerializer(serializers.ModelSerializer):
             'county',
             'sub_county',
             'nearest_town',
+            'latitude',
+            'longitude',
             'years_farming',
             'primary_crop',
             'secondary_crops',
-            'photo'
+            'farming_method',
+            'irrigation_access',
+            'photo',
+            'preferred_language'
         ]
+    
+    def validate_years_farming(self, value):
+        """Validate years of farming"""
+        if value < 0:
+            raise serializers.ValidationError("Years farming cannot be negative.")
+        if value > 80:
+            raise serializers.ValidationError("Years farming seems unrealistic.")
+        return value
 
 
 class FarmerDetailSerializer(serializers.ModelSerializer):
@@ -160,8 +194,12 @@ class FarmerDetailSerializer(serializers.ModelSerializer):
     user_details = UserSerializer(source='user', read_only=True)
     farms_count = serializers.SerializerMethodField()
     total_farm_size = serializers.SerializerMethodField()
+    crops_list = serializers.SerializerMethodField()
     latest_pulse_score = serializers.SerializerMethodField()
     days_since_registered = serializers.SerializerMethodField()
+    onboarding_progress = serializers.SerializerMethodField()
+    full_location = serializers.SerializerMethodField()
+    is_fraud_flagged = serializers.SerializerMethodField()
     
     class Meta:
         model = Farmer
@@ -175,16 +213,28 @@ class FarmerDetailSerializer(serializers.ModelSerializer):
             'county',
             'sub_county',
             'nearest_town',
+            'full_location',
+            'latitude',
+            'longitude',
             'years_farming',
             'primary_crop',
             'secondary_crops',
+            'crops_list',
+            'farming_method',
+            'irrigation_access',
             'photo',
+            'fraud_status',
             'onboarding_completed',
+            'onboarding_completed_at',
             'is_active',
             'farms_count',
             'total_farm_size',
             'latest_pulse_score',
             'days_since_registered',
+            'onboarding_progress',
+            'is_fraud_flagged',
+            'preferred_language',
+            'referral_source',
             'created_at',
             'updated_at'
         ]
@@ -192,22 +242,47 @@ class FarmerDetailSerializer(serializers.ModelSerializer):
     
     def get_farms_count(self, obj):
         """Get number of farms"""
-        return obj.farms.count()
+        return obj.farms.filter(is_active=True).count()
     
     def get_total_farm_size(self, obj):
         """Get total farm size in acres"""
-        total = sum(float(farm.size_acres) for farm in obj.farms.all())
-        return round(total, 2)
+        return float(obj.get_total_farm_size())
+    
+    def get_crops_list(self, obj):
+        """Get all crops"""
+        return obj.get_crops_list()
     
     def get_latest_pulse_score(self, obj):
         """Get latest Pulse Score"""
-        # This will be populated when scoring app is built
+        try:
+            from apps.scoring.models import PulseScore
+            latest = PulseScore.objects.filter(farmer=obj).order_by('-created_at').first()
+            if latest:
+                return {
+                    'score': latest.score,
+                    'created_at': latest.created_at,
+                    'confidence': latest.confidence
+                }
+        except:
+            pass
         return None
     
     def get_days_since_registered(self, obj):
         """Calculate days since registration"""
         delta = timezone.now() - obj.created_at
         return delta.days
+    
+    def get_onboarding_progress(self, obj):
+        """Get onboarding progress"""
+        return FarmerProfileService.get_onboarding_progress(obj)
+    
+    def get_full_location(self, obj):
+        """Get full location"""
+        return obj.get_full_location()
+    
+    def get_is_fraud_flagged(self, obj):
+        """Check if fraud flagged"""
+        return obj.is_fraud_flagged()
 
 
 class VoiceRegistrationSerializer(serializers.ModelSerializer):
@@ -215,6 +290,7 @@ class VoiceRegistrationSerializer(serializers.ModelSerializer):
     
     farmer_name = serializers.CharField(source='farmer.full_name', read_only=True)
     pulse_id = serializers.CharField(source='farmer.pulse_id', read_only=True)
+    confidence_percentage = serializers.SerializerMethodField()
     
     class Meta:
         model = VoiceRegistration
@@ -224,11 +300,19 @@ class VoiceRegistrationSerializer(serializers.ModelSerializer):
             'farmer_name',
             'pulse_id',
             'audio_file',
+            'audio_duration',
+            'audio_format',
+            'audio_size',
             'transcript',
             'detected_language',
             'confidence_score',
+            'confidence_percentage',
             'processed_data',
-            'created_at'
+            'field_confidence',
+            'processing_status',
+            'processing_error',
+            'created_at',
+            'processed_at'
         ]
         read_only_fields = [
             'id',
@@ -236,8 +320,19 @@ class VoiceRegistrationSerializer(serializers.ModelSerializer):
             'detected_language',
             'confidence_score',
             'processed_data',
-            'created_at'
+            'field_confidence',
+            'processing_status',
+            'processing_error',
+            'audio_duration',
+            'audio_format',
+            'audio_size',
+            'created_at',
+            'processed_at'
         ]
+    
+    def get_confidence_percentage(self, obj):
+        """Get confidence as percentage"""
+        return obj.get_confidence_percentage()
 
 
 class VoiceRegistrationCreateSerializer(serializers.ModelSerializer):
@@ -256,8 +351,8 @@ class VoiceRegistrationCreateSerializer(serializers.ModelSerializer):
             )
         
         # Check file type
-        allowed_types = ['audio/wav', 'audio/mp3', 'audio/mpeg', 'audio/ogg']
-        if value.content_type not in allowed_types:
+        allowed_types = ['audio/wav', 'audio/mp3', 'audio/mpeg', 'audio/ogg', 'audio/webm']
+        if hasattr(value, 'content_type') and value.content_type not in allowed_types:
             raise serializers.ValidationError(
                 f"Invalid audio format. Allowed: {', '.join(allowed_types)}"
             )
@@ -266,19 +361,72 @@ class VoiceRegistrationCreateSerializer(serializers.ModelSerializer):
     
     def create(self, validated_data):
         """Process voice registration"""
-        # For now, create with dummy data
-        # In production, this would call OpenAI Whisper service
+        audio_file = validated_data['audio_file']
         
+        # Extract metadata
+        audio_size = audio_file.size
+        audio_format = audio_file.name.split('.')[-1] if '.' in audio_file.name else 'unknown'
+        
+        # Create voice registration (processing will be done async)
         voice_registration = VoiceRegistration.objects.create(
             farmer=validated_data['farmer'],
-            audio_file=validated_data['audio_file'],
-            transcript='[Voice processing placeholder]',
+            audio_file=audio_file,
+            audio_size=audio_size,
+            audio_format=audio_format,
+            transcript='[Processing...]',
             detected_language='en',
-            confidence_score=0.85,
-            processed_data={}
+            confidence_score=0.0,
+            processed_data={},
+            field_confidence={},
+            processing_status='pending'
         )
         
+        # TODO: Trigger async task to process audio with Whisper
+        # from apps.voice.tasks import process_voice_registration
+        # process_voice_registration.delay(voice_registration.id)
+        
         return voice_registration
+
+
+class FarmerNoteSerializer(serializers.ModelSerializer):
+    """Serializer for Farmer Notes"""
+    
+    created_by_name = serializers.CharField(
+        source='created_by.get_full_name',
+        read_only=True
+    )
+    
+    class Meta:
+        model = FarmerNote
+        fields = [
+            'id',
+            'farmer',
+            'created_by',
+            'created_by_name',
+            'note_type',
+            'content',
+            'is_internal',
+            'created_at',
+            'updated_at'
+        ]
+        read_only_fields = ['id', 'created_at', 'updated_at']
+
+
+class FarmerNoteCreateSerializer(serializers.ModelSerializer):
+    """Serializer for creating farmer notes"""
+    
+    class Meta:
+        model = FarmerNote
+        fields = ['farmer', 'note_type', 'content', 'is_internal']
+    
+    def create(self, validated_data):
+        """Create note with current user"""
+        user = self.context.get('user')
+        
+        return FarmerNote.objects.create(
+            created_by=user,
+            **validated_data
+        )
 
 
 class FarmerStatsSerializer(serializers.Serializer):
@@ -288,8 +436,10 @@ class FarmerStatsSerializer(serializers.Serializer):
     active_farmers = serializers.IntegerField()
     verified_farmers = serializers.IntegerField()
     onboarded_farmers = serializers.IntegerField()
+    flagged_farmers = serializers.IntegerField()
     by_county = serializers.ListField()
     by_crop = serializers.ListField()
+    by_fraud_status = serializers.ListField()
     average_farm_size = serializers.FloatField()
     average_experience = serializers.FloatField()
 
@@ -299,7 +449,22 @@ class FarmerOnboardingSerializer(serializers.Serializer):
     
     farmer_id = serializers.IntegerField()
     pulse_id = serializers.CharField()
-    steps_completed = serializers.DictField()
-    progress_percentage = serializers.IntegerField()
+    steps = serializers.DictField()
+    completed = serializers.IntegerField()
+    total = serializers.IntegerField()
+    percentage = serializers.IntegerField()
     next_step = serializers.CharField()
     is_complete = serializers.BooleanField()
+
+
+class FarmerSearchResultSerializer(serializers.Serializer):
+    """Serializer for search results"""
+    
+    pulse_id = serializers.CharField()
+    full_name = serializers.CharField()
+    county = serializers.CharField()
+    primary_crop = serializers.CharField()
+    phone_number = serializers.CharField()
+    is_verified = serializers.BooleanField()
+    fraud_status = serializers.CharField()
+    farms_count = serializers.IntegerField()

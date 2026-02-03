@@ -5,6 +5,7 @@ from rest_framework_gis.serializers import GeoFeatureModelSerializer, GeometryFi
 from django.contrib.gis.geos import Point, Polygon
 from .models import Farm, FarmBoundaryPoint
 from apps.farmers.models import Farmer
+from .services import AreaCalculator, BoundaryService
 
 
 class FarmBoundaryPointSerializer(serializers.ModelSerializer):
@@ -15,7 +16,16 @@ class FarmBoundaryPointSerializer(serializers.ModelSerializer):
     
     class Meta:
         model = FarmBoundaryPoint
-        fields = ['id', 'sequence', 'latitude', 'longitude', 'created_at']
+        fields = [
+            'id',
+            'sequence',
+            'latitude',
+            'longitude',
+            'altitude',
+            'accuracy',
+            'recorded_at',
+            'created_at'
+        ]
         read_only_fields = ['id', 'created_at']
     
     def get_latitude(self, obj):
@@ -35,6 +45,7 @@ class FarmSerializer(serializers.ModelSerializer):
     center_latitude = serializers.SerializerMethodField()
     center_longitude = serializers.SerializerMethodField()
     boundary_coordinates = serializers.SerializerMethodField()
+    area_info = serializers.SerializerMethodField()
     
     class Meta:
         model = Farm
@@ -46,7 +57,10 @@ class FarmSerializer(serializers.ModelSerializer):
             'pulse_id',
             'size_acres',
             'size_hectares',
+            'area_info',
             'elevation',
+            'soil_type',
+            'slope_percentage',
             'county',
             'sub_county',
             'ward',
@@ -54,8 +68,15 @@ class FarmSerializer(serializers.ModelSerializer):
             'center_longitude',
             'boundary_coordinates',
             'satellite_verified',
+            'verification_confidence',
             'last_verified',
+            'boundary_source',
+            'boundary_accuracy_meters',
+            'land_ownership_type',
             'is_primary',
+            'is_active',
+            'irrigation_available',
+            'water_source',
             'created_at',
             'updated_at'
         ]
@@ -64,6 +85,7 @@ class FarmSerializer(serializers.ModelSerializer):
             'farm_id',
             'size_hectares',
             'satellite_verified',
+            'verification_confidence',
             'last_verified',
             'created_at',
             'updated_at'
@@ -79,10 +101,15 @@ class FarmSerializer(serializers.ModelSerializer):
     
     def get_boundary_coordinates(self, obj):
         """Get boundary coordinates as array"""
-        if obj.boundary:
-            coords = obj.boundary.coords[0]
-            return [{'lat': point[1], 'lng': point[0]} for point in coords]
-        return []
+        return obj.get_boundary_coordinates()
+    
+    def get_area_info(self, obj):
+        """Get area in different units"""
+        return {
+            'acres': float(obj.size_acres),
+            'hectares': float(obj.size_hectares),
+            'square_meters': obj.get_area_in_square_meters()
+        }
 
 
 class FarmCreateSerializer(serializers.ModelSerializer):
@@ -102,50 +129,30 @@ class FarmCreateSerializer(serializers.ModelSerializer):
             'sub_county',
             'ward',
             'elevation',
+            'soil_type',
+            'slope_percentage',
             'boundary_points',
+            'boundary_source',
+            'land_ownership_type',
             'ownership_document',
-            'is_primary'
+            'is_primary',
+            'irrigation_available',
+            'water_source'
         ]
     
     def validate_boundary_points(self, value):
-        """Validate boundary points"""
-        if len(value) < 3:
-            raise serializers.ValidationError(
-                "At least 3 points are required to define a boundary"
-            )
+        """Validate boundary points using service"""
+        is_valid, errors, warnings = BoundaryService.validate_boundary_points(value)
         
-        # Validate each point has lat and lng
-        for i, point in enumerate(value):
-            if 'lat' not in point or 'lng' not in point:
-                raise serializers.ValidationError(
-                    f"Point {i} must have 'lat' and 'lng' fields"
-                )
-            
-            # Validate coordinate ranges
-            try:
-                lat = float(point['lat'])
-                lng = float(point['lng'])
-                
-                if not (-90 <= lat <= 90):
-                    raise serializers.ValidationError(
-                        f"Point {i}: Latitude must be between -90 and 90"
-                    )
-                
-                if not (-180 <= lng <= 180):
-                    raise serializers.ValidationError(
-                        f"Point {i}: Longitude must be between -180 and 180"
-                    )
-                
-                # Validate Kenya coordinates (rough bounds)
-                if not (-5 <= lat <= 5 and 33 <= lng <= 42):
-                    raise serializers.ValidationError(
-                        f"Point {i}: Coordinates appear to be outside Kenya"
-                    )
-            
-            except (ValueError, TypeError):
-                raise serializers.ValidationError(
-                    f"Point {i}: Invalid coordinate values"
-                )
+        if not is_valid:
+            raise serializers.ValidationError({
+                'errors': errors,
+                'warnings': warnings
+            })
+        
+        # Store warnings in context for later use
+        if warnings:
+            self.context['boundary_warnings'] = warnings
         
         return value
     
@@ -155,6 +162,30 @@ class FarmCreateSerializer(serializers.ModelSerializer):
             raise serializers.ValidationError(
                 "Cannot create farm for inactive farmer"
             )
+        
+        if not value.user.is_verified:
+            raise serializers.ValidationError(
+                "Farmer's phone number must be verified before adding farms"
+            )
+        
+        return value
+    
+    def validate_elevation(self, value):
+        """Validate elevation is reasonable for Kenya"""
+        if value is not None:
+            if value < -100:
+                raise serializers.ValidationError("Elevation cannot be below -100m")
+            if value > 6000:
+                raise serializers.ValidationError("Elevation cannot exceed 6000m (higher than Mt. Kenya)")
+        return value
+    
+    def validate_slope_percentage(self, value):
+        """Validate slope percentage"""
+        if value is not None:
+            if value < 0:
+                raise serializers.ValidationError("Slope cannot be negative")
+            if value > 100:
+                raise serializers.ValidationError("Slope cannot exceed 100%")
         return value
     
     def create(self, validated_data):
@@ -162,49 +193,43 @@ class FarmCreateSerializer(serializers.ModelSerializer):
         boundary_points_data = validated_data.pop('boundary_points')
         
         # Create polygon from boundary points
-        # Format: [(lng, lat), (lng, lat), ...]
-        coords = [
-            (float(point['lng']), float(point['lat']))
-            for point in boundary_points_data
-        ]
-        
-        # Close the polygon (first point = last point)
-        if coords[0] != coords[-1]:
-            coords.append(coords[0])
-        
-        # Create polygon
-        boundary = Polygon(coords)
+        polygon = BoundaryService.create_polygon_from_points(boundary_points_data)
         
         # Calculate center point
-        center_point = boundary.centroid
+        center_point = AreaCalculator.calculate_centroid(polygon)
         
-        # Calculate area in acres
-        # boundary.area returns square meters (with geography=True)
-        area_sq_meters = boundary.area
-        area_acres = area_sq_meters / 4046.86
-        area_hectares = area_sq_meters / 10000
+        # Calculate area
+        area_result = AreaCalculator.calculate_polygon_area(polygon)
         
         # Generate farm ID
         farm_id = self._generate_farm_id(validated_data['farmer'])
         
+        # Estimate boundary accuracy if points have accuracy data
+        avg_accuracy = None
+        if any('accuracy' in p for p in boundary_points_data):
+            accuracies = [p['accuracy'] for p in boundary_points_data if 'accuracy' in p]
+            if accuracies:
+                avg_accuracy = sum(accuracies) / len(accuracies)
+        
         # Create farm
         farm = Farm.objects.create(
             farm_id=farm_id,
-            boundary=boundary,
+            boundary=polygon,
             center_point=center_point,
-            size_acres=round(area_acres, 2),
-            size_hectares=round(area_hectares, 2),
+            size_acres=area_result['acres'],
+            size_hectares=area_result['hectares'],
+            boundary_accuracy_meters=avg_accuracy,
             **validated_data
         )
         
         # Create boundary point records
-        for i, point_data in enumerate(boundary_points_data):
-            point = Point(float(point_data['lng']), float(point_data['lat']))
-            FarmBoundaryPoint.objects.create(
-                farm=farm,
-                point=point,
-                sequence=i
-            )
+        BoundaryService.create_farm_boundary(farm, boundary_points_data)
+        
+        # Check for overlaps (async or log warning)
+        overlap_result = BoundaryService.check_boundary_overlap(farm)
+        if overlap_result['has_overlaps']:
+            # Log warning or create notification
+            print(f"Warning: Farm {farm_id} overlaps with {overlap_result['overlap_count']} farms")
         
         return farm
     
@@ -212,12 +237,13 @@ class FarmCreateSerializer(serializers.ModelSerializer):
         """Generate unique farm ID"""
         import random
         
-        # Format: FARM-{pulse_id}-{number}
-        pulse_id = farmer.pulse_id.split('-')[1]  # Get middle part (e.g., "882")
+        # Format: FARM-{pulse_id_number}-{random}
+        pulse_parts = farmer.pulse_id.split('-')
+        pulse_number = pulse_parts[1] if len(pulse_parts) > 1 else '000'
         
         while True:
             number = random.randint(10, 99)
-            farm_id = f"FARM-{pulse_id}-{number}"
+            farm_id = f"FARM-{pulse_number}-{number}"
             
             if not Farm.objects.filter(farm_id=farm_id).exists():
                 return farm_id
@@ -233,9 +259,21 @@ class FarmUpdateSerializer(serializers.ModelSerializer):
             'sub_county',
             'ward',
             'elevation',
+            'soil_type',
+            'slope_percentage',
+            'land_ownership_type',
             'ownership_document',
-            'is_primary'
+            'is_primary',
+            'irrigation_available',
+            'water_source'
         ]
+    
+    def validate_elevation(self, value):
+        """Validate elevation"""
+        if value is not None:
+            if value < -100 or value > 6000:
+                raise serializers.ValidationError("Elevation must be between -100m and 6000m")
+        return value
 
 
 class FarmDetailSerializer(serializers.ModelSerializer):
@@ -244,8 +282,10 @@ class FarmDetailSerializer(serializers.ModelSerializer):
     farmer_details = serializers.SerializerMethodField()
     location = serializers.SerializerMethodField()
     boundary_geojson = serializers.SerializerMethodField()
+    boundary_analysis = serializers.SerializerMethodField()
     satellite_scan_summary = serializers.SerializerMethodField()
     nearby_farms = serializers.SerializerMethodField()
+    area_breakdown = serializers.SerializerMethodField()
     
     class Meta:
         model = Farm
@@ -254,18 +294,27 @@ class FarmDetailSerializer(serializers.ModelSerializer):
             'farm_id',
             'farmer_details',
             'location',
-            'size_acres',
-            'size_hectares',
+            'area_breakdown',
             'elevation',
+            'soil_type',
+            'slope_percentage',
             'county',
             'sub_county',
             'ward',
             'boundary_geojson',
+            'boundary_analysis',
             'satellite_verified',
+            'verification_confidence',
             'last_verified',
             'satellite_scan_summary',
+            'boundary_source',
+            'boundary_accuracy_meters',
+            'land_ownership_type',
             'ownership_document',
             'is_primary',
+            'is_active',
+            'irrigation_available',
+            'water_source',
             'nearby_farms',
             'created_at',
             'updated_at'
@@ -279,36 +328,53 @@ class FarmDetailSerializer(serializers.ModelSerializer):
             'full_name': obj.farmer.full_name,
             'phone_number': obj.farmer.user.phone_number,
             'county': obj.farmer.county,
-            'primary_crop': obj.farmer.primary_crop
+            'primary_crop': obj.farmer.primary_crop,
+            'years_farming': obj.farmer.years_farming
         }
     
     def get_location(self, obj):
         """Get location details"""
         return {
-            'center': {
-                'latitude': obj.center_point.y,
-                'longitude': obj.center_point.x
-            },
+            'center': obj.get_center_coordinates(),
             'address': {
                 'county': obj.county,
                 'sub_county': obj.sub_county,
                 'ward': obj.ward
             },
-            'elevation': obj.elevation
+            'elevation': obj.elevation,
+            'within_kenya': BoundaryService.validate_kenya_location(obj.center_point)
         }
     
     def get_boundary_geojson(self, obj):
         """Get boundary as GeoJSON"""
-        if obj.boundary:
-            # GeoJSON format
-            coords = obj.boundary.coords[0]
-            return {
-                'type': 'Polygon',
-                'coordinates': [[
-                    [point[0], point[1]] for point in coords
-                ]]
-            }
-        return None
+        return BoundaryService.convert_to_geojson(obj)
+    
+    def get_boundary_analysis(self, obj):
+        """Get boundary analysis"""
+        # Calculate shape complexity
+        complexity = AreaCalculator.calculate_shape_complexity(obj.boundary)
+        
+        # Calculate perimeter
+        perimeter = AreaCalculator.calculate_perimeter(obj.boundary)
+        
+        # Get bounding box
+        bbox = AreaCalculator.calculate_bounding_box(obj.boundary)
+        
+        # Check for anomalies
+        anomalies = AreaCalculator.detect_anomalies(obj.boundary)
+        
+        # Get boundary accuracy
+        boundary_points = obj.boundary_points.all()
+        accuracy = BoundaryService.calculate_boundary_accuracy(boundary_points)
+        
+        return {
+            'vertices_count': len(obj.boundary.coords[0]),
+            'perimeter_meters': perimeter,
+            'shape_complexity': complexity,
+            'bounding_box': bbox,
+            'anomalies': anomalies,
+            'boundary_accuracy': accuracy
+        }
     
     def get_satellite_scan_summary(self, obj):
         """Get satellite scan summary"""
@@ -317,7 +383,8 @@ class FarmDetailSerializer(serializers.ModelSerializer):
         if not latest_scan:
             return {
                 'total_scans': 0,
-                'latest_scan': None
+                'latest_scan': None,
+                'needs_scan': True
             }
         
         return {
@@ -328,43 +395,57 @@ class FarmDetailSerializer(serializers.ModelSerializer):
                 'ndvi': latest_scan.ndvi,
                 'crop_health': latest_scan.crop_health_status,
                 'satellite_type': latest_scan.satellite_type
-            }
+            },
+            'needs_scan': obj.needs_verification()
         }
     
     def get_nearby_farms(self, obj):
         """Get nearby farms (within 5km)"""
         from django.contrib.gis.measure import D
         
-        # Find farms within 5km
         nearby = Farm.objects.filter(
-            center_point__distance_lte=(obj.center_point, D(km=5))
+            center_point__distance_lte=(obj.center_point, D(km=5)),
+            is_active=True
         ).exclude(id=obj.id).select_related('farmer')[:5]
         
-        return [
-            {
+        results = []
+        for farm in nearby:
+            distance = BoundaryService.calculate_distance_between_farms(obj, farm)
+            results.append({
                 'farm_id': farm.farm_id,
                 'farmer_name': farm.farmer.full_name,
-                'distance_km': round(
-                    obj.center_point.distance(farm.center_point) / 1000,
-                    2
-                )
-            }
-            for farm in nearby
-        ]
+                'distance_km': distance['distance_km'],
+                'size_acres': float(farm.size_acres)
+            })
+        
+        return results
+    
+    def get_area_breakdown(self, obj):
+        """Get area in all units"""
+        return {
+            'acres': float(obj.size_acres),
+            'hectares': float(obj.size_hectares),
+            'square_meters': obj.get_area_in_square_meters(),
+            'perimeter_meters': obj.get_perimeter_meters()
+        }
 
 
 class FarmGeoJSONSerializer(GeoFeatureModelSerializer):
     """GeoJSON serializer for mapping applications"""
+    
+    farmer_name = serializers.CharField(source='farmer.full_name', read_only=True)
     
     class Meta:
         model = Farm
         geo_field = 'boundary'
         fields = [
             'farm_id',
+            'farmer_name',
             'size_acres',
             'county',
             'satellite_verified',
-            'is_primary'
+            'is_primary',
+            'is_active'
         ]
 
 
@@ -390,3 +471,33 @@ class FarmSearchSerializer(serializers.Serializer):
     size_acres = serializers.FloatField()
     satellite_verified = serializers.BooleanField()
     distance_km = serializers.FloatField(required=False)
+
+
+class BoundaryValidationSerializer(serializers.Serializer):
+    """Serializer for boundary validation results"""
+    
+    is_valid = serializers.BooleanField()
+    errors = serializers.ListField(child=serializers.CharField())
+    warnings = serializers.ListField(child=serializers.CharField())
+    calculated_area = serializers.DictField(required=False)
+    shape_complexity = serializers.FloatField(required=False)
+
+
+class FarmOverlapCheckSerializer(serializers.Serializer):
+    """Serializer for farm overlap check results"""
+    
+    has_overlaps = serializers.BooleanField()
+    overlap_count = serializers.IntegerField()
+    overlaps = serializers.ListField()
+
+
+class NearbyFarmSerializer(serializers.Serializer):
+    """Serializer for nearby farm results"""
+    
+    farm_id = serializers.CharField()
+    farmer_name = serializers.CharField()
+    pulse_id = serializers.CharField()
+    size_acres = serializers.FloatField()
+    county = serializers.CharField()
+    distance_km = serializers.FloatField()
+    satellite_verified = serializers.BooleanField()

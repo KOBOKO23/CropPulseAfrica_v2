@@ -7,7 +7,8 @@ from rest_framework.views import APIView
 from rest_framework_simplejwt.tokens import RefreshToken
 from django.contrib.auth import login, logout
 from django.utils import timezone
-from .models import User
+from .models import User, AuditLog
+from .services import AuthService, TenantService
 from .serializers import (
     UserSerializer,
     UserRegistrationSerializer,
@@ -15,7 +16,8 @@ from .serializers import (
     PasswordChangeSerializer,
     UserProfileUpdateSerializer,
     PhoneVerificationSerializer,
-    UserDetailSerializer
+    UserDetailSerializer,
+    AuditLogSerializer
 )
 
 
@@ -342,3 +344,163 @@ def user_statistics(request):
     }
     
     return Response(stats, status=status.HTTP_200_OK)
+
+
+class LoginView(APIView):
+    """
+    POST /api/v1/auth/login/
+    
+    Authenticate user and return JWT tokens
+    """
+    permission_classes = [permissions.AllowAny]
+    serializer_class = LoginSerializer
+    
+    def post(self, request):
+        serializer = LoginSerializer(data=request.data, context={'request': request})
+        serializer.is_valid(raise_exception=True)
+        
+        user = serializer.validated_data['user']
+        
+        # Update last login and activity  # UPDATED
+        from django.utils import timezone
+        user.last_login = timezone.now()
+        user.last_activity = timezone.now()  # NEW
+        user.save(update_fields=['last_login', 'last_activity'])
+        
+        # Login user
+        login(request, user)
+        
+        # Generate JWT tokens using AuthService  # UPDATED
+        tokens = AuthService.generate_tokens(user)
+        
+        # Create audit log  # NEW
+        AuthService.create_audit_log(
+            user=user,
+            action='login',
+            ip_address=self.get_client_ip(request),
+            user_agent=request.META.get('HTTP_USER_AGENT'),
+            metadata={'login_method': 'password'}
+        )
+        
+        return Response({
+            'message': 'Login successful',
+            'user': UserDetailSerializer(user).data,
+            'tokens': tokens  # UPDATED
+        }, status=status.HTTP_200_OK)
+    
+    def get_client_ip(self, request):
+        """Get client IP address"""
+        x_forwarded_for = request.META.get('HTTP_X_FORWARDED_FOR')
+        if x_forwarded_for:
+            ip = x_forwarded_for.split(',')[0]
+        else:
+            ip = request.META.get('REMOTE_ADDR')
+        return ip
+
+
+class LogoutView(APIView):
+    """
+    POST /api/v1/auth/logout/
+    
+    Logout user and blacklist refresh token
+    """
+    permission_classes = [permissions.IsAuthenticated]
+    
+    def post(self, request):
+        try:
+            # Create audit log  # NEW
+            AuthService.create_audit_log(
+                user=request.user,
+                action='logout',
+                ip_address=self.get_client_ip(request),
+                user_agent=request.META.get('HTTP_USER_AGENT')
+            )
+            
+            # Get refresh token from request
+            refresh_token = request.data.get('refresh_token')
+            
+            if refresh_token:
+                # Blacklist the refresh token
+                from rest_framework_simplejwt.tokens import RefreshToken
+                token = RefreshToken(refresh_token)
+                token.blacklist()
+            
+            # Logout user from session
+            logout(request)
+            
+            return Response({
+                'message': 'Logout successful'
+            }, status=status.HTTP_200_OK)
+        
+        except Exception as e:
+            return Response({
+                'error': 'Invalid token or logout failed'
+            }, status=status.HTTP_400_BAD_REQUEST)
+    
+    def get_client_ip(self, request):
+        """Get client IP address"""
+        x_forwarded_for = request.META.get('HTTP_X_FORWARDED_FOR')
+        if x_forwarded_for:
+            ip = x_forwarded_for.split(',')[0]
+        else:
+            ip = request.META.get('REMOTE_ADDR')
+        return ip
+
+
+# NEW: Audit Log View
+class AuditLogListView(generics.ListAPIView):
+    """
+    GET /api/v1/auth/audit-logs/
+    
+    List audit logs (own logs for users, all logs for admins)
+    """
+    serializer_class = AuditLogSerializer
+    permission_classes = [permissions.IsAuthenticated]
+    
+    def get_queryset(self):
+        user = self.request.user
+        
+        # Admins see all logs
+        if user.is_staff or user.user_type == 'admin':
+            queryset = AuditLog.objects.all()
+        else:
+            # Users see only their own logs
+            queryset = AuditLog.objects.filter(user=user)
+        
+        # Filter by action if provided
+        action = self.request.query_params.get('action')
+        if action:
+            queryset = queryset.filter(action=action)
+        
+        # Filter by date range
+        from_date = self.request.query_params.get('from_date')
+        to_date = self.request.query_params.get('to_date')
+        
+        if from_date:
+            queryset = queryset.filter(timestamp__gte=from_date)
+        
+        if to_date:
+            queryset = queryset.filter(timestamp__lte=to_date)
+        
+        return queryset.order_by('-timestamp')
+
+
+# NEW: Password Strength Check
+@api_view(['POST'])
+@permission_classes([permissions.AllowAny])
+def check_password_strength(request):
+    """
+    POST /api/v1/auth/password/strength/
+    
+    Check password strength
+    """
+    password = request.data.get('password')
+    
+    if not password:
+        return Response({
+            'error': 'Password is required'
+        }, status=status.HTTP_400_BAD_REQUEST)
+    
+    strength = AuthService.check_password_strength(password)
+    
+    return Response(strength, status=status.HTTP_200_OK)

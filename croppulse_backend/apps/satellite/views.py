@@ -17,7 +17,7 @@ from .serializers import (
     NDVIHistorySerializer,
     NDVITrendSerializer,
     FarmHealthSummarySerializer,
-    BulkScanRequestSerializer
+    BulkScanRequestSerializer,
 )
 from .tasks import process_satellite_scan, bulk_process_scans
 from core.permissions import IsFarmerOrAdmin, IsBankOrAdmin
@@ -39,7 +39,7 @@ class TriggerSatelliteScanView(APIView):
         
         return Response({
             'message': 'Satellite scan initiated successfully',
-            'data': result
+            'data': result,
         }, status=status.HTTP_202_ACCEPTED)
 
 
@@ -55,7 +55,7 @@ class SatelliteScanListView(generics.ListAPIView):
     def get_queryset(self):
         queryset = SatelliteScan.objects.select_related(
             'farm',
-            'farm__farmer'
+            'farm__farmer',
         ).order_by('-acquisition_date')
         
         # Filter by farm
@@ -76,6 +76,11 @@ class SatelliteScanListView(generics.ListAPIView):
         health_status = self.request.query_params.get('health_status')
         if health_status:
             queryset = queryset.filter(crop_health_status=health_status)
+        
+        # Filter by processing status
+        processing_status = self.request.query_params.get('processing_status')
+        if processing_status:
+            queryset = queryset.filter(processing_status=processing_status)
         
         # Filter by date range
         start_date = self.request.query_params.get('start_date')
@@ -101,7 +106,7 @@ class SatelliteScanDetailView(generics.RetrieveAPIView):
     def get_queryset(self):
         queryset = SatelliteScan.objects.select_related(
             'farm',
-            'farm__farmer'
+            'farm__farmer',
         )
         
         # Farmers can only see their own scans
@@ -126,7 +131,7 @@ class FarmLatestScanView(APIView):
         if request.user.user_type == 'farmer':
             if farm.farmer.user != request.user:
                 return Response({
-                    'error': 'You do not have permission to view this farm'
+                    'error': 'You do not have permission to view this farm',
                 }, status=status.HTTP_403_FORBIDDEN)
         
         latest_scan = SatelliteScan.objects.filter(farm=farm).order_by('-acquisition_date').first()
@@ -134,7 +139,7 @@ class FarmLatestScanView(APIView):
         if not latest_scan:
             return Response({
                 'message': 'No scans available for this farm',
-                'farm_id': farm_id
+                'farm_id': farm_id,
             }, status=status.HTTP_404_NOT_FOUND)
         
         serializer = SatelliteScanDetailSerializer(latest_scan)
@@ -194,7 +199,7 @@ class NDVITrendView(APIView):
         if request.user.user_type == 'farmer':
             if farm.farmer.user != request.user:
                 return Response({
-                    'error': 'You do not have permission to view this farm'
+                    'error': 'You do not have permission to view this farm',
                 }, status=status.HTTP_403_FORBIDDEN)
         
         # Get date range (default: last 90 days)
@@ -206,20 +211,20 @@ class NDVITrendView(APIView):
         history = NDVIHistory.objects.filter(
             farm=farm,
             date__gte=start_date,
-            date__lte=end_date
+            date__lte=end_date,
         ).order_by('date')
         
         if not history.exists():
             return Response({
                 'message': 'No NDVI data available for this period',
-                'farm_id': farm_id
+                'farm_id': farm_id,
             }, status=status.HTTP_404_NOT_FOUND)
         
         # Calculate statistics
         data_points = [
             {
                 'date': h.date.isoformat(),
-                'ndvi': h.ndvi_value
+                'ndvi': h.ndvi_value,
             }
             for h in history
         ]
@@ -254,7 +259,7 @@ class NDVITrendView(APIView):
             'average_ndvi': round(avg_ndvi, 3),
             'min_ndvi': round(min_ndvi, 3),
             'max_ndvi': round(max_ndvi, 3),
-            'change_percentage': round(change_percentage, 2)
+            'change_percentage': round(change_percentage, 2),
         }
         
         serializer = NDVITrendSerializer(response_data)
@@ -276,7 +281,7 @@ class FarmHealthSummaryView(APIView):
         if request.user.user_type == 'farmer':
             if farm.farmer.user != request.user:
                 return Response({
-                    'error': 'You do not have permission to view this farm'
+                    'error': 'You do not have permission to view this farm',
                 }, status=status.HTTP_403_FORBIDDEN)
         
         # Get latest scan
@@ -285,7 +290,7 @@ class FarmHealthSummaryView(APIView):
         if not latest_scan:
             return Response({
                 'message': 'No satellite data available for this farm',
-                'farm_id': farm_id
+                'farm_id': farm_id,
             }, status=status.HTTP_404_NOT_FOUND)
         
         # Get NDVI trend (last 30 days)
@@ -294,7 +299,7 @@ class FarmHealthSummaryView(APIView):
         
         ndvi_history = NDVIHistory.objects.filter(
             farm=farm,
-            date__gte=start_date
+            date__gte=start_date,
         ).order_by('date')
         
         if ndvi_history.exists():
@@ -316,20 +321,23 @@ class FarmHealthSummaryView(APIView):
         # Generate recommendations
         recommendations = self._generate_recommendations(latest_scan, trend)
         
+        # Build the payload that matches FarmHealthSummarySerializer's shape
         response_data = {
             'farm_id': farm_id,
             'latest_scan': SatelliteScanSerializer(latest_scan).data,
             'ndvi_trend': {
                 'average': round(avg_ndvi, 3),
                 'trend': trend,
-                'period_days': 30
+                'period_days': 30,
             },
             'health_score': health_score,
             'recommendations': recommendations,
-            'last_updated': latest_scan.acquisition_date
+            'last_updated': latest_scan.acquisition_date,
         }
         
-        return Response(response_data, status=status.HTTP_200_OK)
+        # Validate / serialize through FarmHealthSummarySerializer before returning
+        serializer = FarmHealthSummarySerializer(response_data)
+        return Response(serializer.data, status=status.HTTP_200_OK)
     
     def _calculate_health_score(self, scan, avg_ndvi):
         """Calculate overall health score"""
@@ -361,6 +369,8 @@ class FarmHealthSummaryView(APIView):
             score += 30
         elif scan.crop_health_status == 'Stressed':
             score += 15
+        elif scan.crop_health_status == 'Unknown':
+            score += 10  # partial credit — data was unavailable, not necessarily bad
         else:
             score += 5
         
@@ -381,6 +391,9 @@ class FarmHealthSummaryView(APIView):
         
         if scan.crop_health_status == 'Stressed':
             recommendations.append('Crops showing stress - inspect for pests or disease')
+        
+        if scan.crop_health_status == 'Unknown':
+            recommendations.append('Optical data was unavailable - schedule a new scan for full assessment')
         
         if scan.cloud_cover_percentage > 70 and not scan.sar_penetrated_clouds:
             recommendations.append('High cloud cover detected - SAR scan recommended for clarity')
@@ -414,7 +427,7 @@ class BulkScanTriggerView(APIView):
         return Response({
             'message': f'Bulk scan initiated for {len(farm_ids)} farms',
             'task_id': task.id,
-            'farm_count': len(farm_ids)
+            'farm_count': len(farm_ids),
         }, status=status.HTTP_202_ACCEPTED)
 
 
@@ -429,25 +442,29 @@ def satellite_statistics(request):
     stats = {
         'total_scans': SatelliteScan.objects.count(),
         'scans_last_7_days': SatelliteScan.objects.filter(
-            acquisition_date__gte=timezone.now() - timedelta(days=7)
+            acquisition_date__gte=timezone.now() - timedelta(days=7),
         ).count(),
         'scans_last_30_days': SatelliteScan.objects.filter(
-            acquisition_date__gte=timezone.now() - timedelta(days=30)
+            acquisition_date__gte=timezone.now() - timedelta(days=30),
         ).count(),
         'average_cloud_cover': SatelliteScan.objects.aggregate(
-            Avg('cloud_cover_percentage')
+            Avg('cloud_cover_percentage'),
         )['cloud_cover_percentage__avg'] or 0,
         'average_ndvi': SatelliteScan.objects.filter(
-            ndvi__isnull=False
+            ndvi__isnull=False,
         ).aggregate(Avg('ndvi'))['ndvi__avg'] or 0,
         'health_distribution': {
             'healthy': SatelliteScan.objects.filter(crop_health_status='Healthy').count(),
             'stressed': SatelliteScan.objects.filter(crop_health_status='Stressed').count(),
             'poor': SatelliteScan.objects.filter(crop_health_status='Poor').count(),
+            'unknown': SatelliteScan.objects.filter(crop_health_status='Unknown').count(),
         },
         'satellite_types': SatelliteScan.objects.values('satellite_type').annotate(
-            count=Count('id')
-        )
+            count=Count('id'),
+        ),
+        'processing_status_distribution': SatelliteScan.objects.values('processing_status').annotate(
+            count=Count('id'),
+        ),
     }
     
     return Response(stats, status=status.HTTP_200_OK)
@@ -467,7 +484,7 @@ def rescan_farm(request, farm_id):
     if request.user.user_type == 'farmer':
         if farm.farmer.user != request.user:
             return Response({
-                'error': 'You do not have permission to scan this farm'
+                'error': 'You do not have permission to scan this farm',
             }, status=status.HTTP_403_FORBIDDEN)
     
     # Trigger scan task
@@ -476,5 +493,5 @@ def rescan_farm(request, farm_id):
     return Response({
         'message': 'Farm rescan initiated',
         'farm_id': farm_id,
-        'task_id': task.id
+        'task_id': task.id,
     }, status=status.HTTP_202_ACCEPTED)
