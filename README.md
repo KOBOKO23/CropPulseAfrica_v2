@@ -3,7 +3,7 @@
 
 AI-powered agricultural credit verification and risk intelligence platform.
 
-![CropPulse Architecture](docs/images/cpa1.jpeg)
+![CropPulse Architecture](croppulse_backend/docs/images/cpa1.jpeg)
 
 
 ---
