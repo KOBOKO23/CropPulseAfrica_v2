@@ -7,6 +7,10 @@ from rest_framework.views import APIView
 from rest_framework_simplejwt.tokens import RefreshToken
 from django.contrib.auth import login, logout
 from django.utils import timezone
+from django.db.models import Count
+from datetime import timedelta
+import random
+
 from .models import User, AuditLog
 from .services import AuthService, TenantService
 from .serializers import (
@@ -21,115 +25,144 @@ from .serializers import (
 )
 
 
+# ----------------------------
+# User Registration & Auth
+# ----------------------------
 class RegisterView(generics.CreateAPIView):
     """
     POST /api/v1/auth/register/
-    
     Register a new user account
     """
     queryset = User.objects.all()
     serializer_class = UserRegistrationSerializer
     permission_classes = [permissions.AllowAny]
-    
+
     def create(self, request, *args, **kwargs):
         serializer = self.get_serializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         user = serializer.save()
-        
-        # Generate JWT tokens
-        refresh = RefreshToken.for_user(user)
-        
+
+        # Generate JWT tokens using AuthService
+        tokens = AuthService.generate_tokens(user)
+
+        # Create audit log
+        AuthService.create_audit_log(
+            user=user,
+            action='register',
+            ip_address=self.get_client_ip(request),
+            user_agent=request.META.get('HTTP_USER_AGENT')
+        )
+
         return Response({
             'message': 'User registered successfully',
             'user': UserSerializer(user).data,
-            'tokens': {
-                'refresh': str(refresh),
-                'access': str(refresh.access_token),
-            }
+            'tokens': tokens
         }, status=status.HTTP_201_CREATED)
+
+    def get_client_ip(self, request):
+        x_forwarded_for = request.META.get('HTTP_X_FORWARDED_FOR')
+        if x_forwarded_for:
+            return x_forwarded_for.split(',')[0]
+        return request.META.get('REMOTE_ADDR')
 
 
 class LoginView(APIView):
     """
     POST /api/v1/auth/login/
-    
     Authenticate user and return JWT tokens
     """
     permission_classes = [permissions.AllowAny]
     serializer_class = LoginSerializer
-    
+
     def post(self, request):
         serializer = LoginSerializer(data=request.data, context={'request': request})
         serializer.is_valid(raise_exception=True)
-        
         user = serializer.validated_data['user']
-        
-        # Update last login
+
+        # Update last login and activity
         user.last_login = timezone.now()
-        user.save(update_fields=['last_login'])
-        
-        # Login user (for session-based auth if needed)
+        user.last_activity = timezone.now()
+        user.save(update_fields=['last_login', 'last_activity'])
+
+        # Login user for session-based auth
         login(request, user)
-        
+
         # Generate JWT tokens
-        refresh = RefreshToken.for_user(user)
-        
+        tokens = AuthService.generate_tokens(user)
+
+        # Create audit log
+        AuthService.create_audit_log(
+            user=user,
+            action='login',
+            ip_address=self.get_client_ip(request),
+            user_agent=request.META.get('HTTP_USER_AGENT'),
+            metadata={'login_method': 'password'}
+        )
+
         return Response({
             'message': 'Login successful',
             'user': UserDetailSerializer(user).data,
-            'tokens': {
-                'refresh': str(refresh),
-                'access': str(refresh.access_token),
-            }
+            'tokens': tokens
         }, status=status.HTTP_200_OK)
+
+    def get_client_ip(self, request):
+        x_forwarded_for = request.META.get('HTTP_X_FORWARDED_FOR')
+        if x_forwarded_for:
+            return x_forwarded_for.split(',')[0]
+        return request.META.get('REMOTE_ADDR')
 
 
 class LogoutView(APIView):
     """
     POST /api/v1/auth/logout/
-    
     Logout user and blacklist refresh token
     """
     permission_classes = [permissions.IsAuthenticated]
-    
+
     def post(self, request):
         try:
-            # Get refresh token from request
+            # Create audit log
+            AuthService.create_audit_log(
+                user=request.user,
+                action='logout',
+                ip_address=self.get_client_ip(request),
+                user_agent=request.META.get('HTTP_USER_AGENT')
+            )
+
+            # Blacklist refresh token if provided
             refresh_token = request.data.get('refresh_token')
-            
             if refresh_token:
-                # Blacklist the refresh token
                 token = RefreshToken(refresh_token)
                 token.blacklist()
-            
-            # Logout user from session
+
+            # Logout user
             logout(request)
-            
-            return Response({
-                'message': 'Logout successful'
-            }, status=status.HTTP_200_OK)
-        
-        except Exception as e:
-            return Response({
-                'error': 'Invalid token or logout failed'
-            }, status=status.HTTP_400_BAD_REQUEST)
+
+            return Response({'message': 'Logout successful'}, status=status.HTTP_200_OK)
+
+        except Exception:
+            return Response({'error': 'Invalid token or logout failed'}, status=status.HTTP_400_BAD_REQUEST)
+
+    def get_client_ip(self, request):
+        x_forwarded_for = request.META.get('HTTP_X_FORWARDED_FOR')
+        if x_forwarded_for:
+            return x_forwarded_for.split(',')[0]
+        return request.META.get('REMOTE_ADDR')
 
 
+# ----------------------------
+# User Profile & Password
+# ----------------------------
 class UserProfileView(generics.RetrieveUpdateAPIView):
     """
-    GET /api/v1/auth/profile/
-    PUT /api/v1/auth/profile/
-    PATCH /api/v1/auth/profile/
-    
+    GET/PUT/PATCH /api/v1/auth/profile/
     Get or update authenticated user's profile
     """
     permission_classes = [permissions.IsAuthenticated]
-    
+
     def get_serializer_class(self):
-        if self.request.method == 'GET':
-            return UserDetailSerializer
-        return UserProfileUpdateSerializer
-    
+        return UserDetailSerializer if self.request.method == 'GET' else UserProfileUpdateSerializer
+
     def get_object(self):
         return self.request.user
 
@@ -137,118 +170,99 @@ class UserProfileView(generics.RetrieveUpdateAPIView):
 class PasswordChangeView(APIView):
     """
     POST /api/v1/auth/password/change/
-    
     Change user password
     """
     permission_classes = [permissions.IsAuthenticated]
-    
+
     def post(self, request):
-        serializer = PasswordChangeSerializer(
-            data=request.data,
-            context={'request': request}
-        )
+        serializer = PasswordChangeSerializer(data=request.data, context={'request': request})
         serializer.is_valid(raise_exception=True)
         serializer.save()
-        
-        return Response({
-            'message': 'Password changed successfully'
-        }, status=status.HTTP_200_OK)
+
+        return Response({'message': 'Password changed successfully'}, status=status.HTTP_200_OK)
 
 
+@api_view(['POST'])
+@permission_classes([permissions.AllowAny])
+def check_password_strength(request):
+    """
+    POST /api/v1/auth/password/strength/
+    Check password strength
+    """
+    password = request.data.get('password')
+    if not password:
+        return Response({'error': 'Password is required'}, status=status.HTTP_400_BAD_REQUEST)
+
+    strength = AuthService.check_password_strength(password)
+    return Response(strength, status=status.HTTP_200_OK)
+
+
+# ----------------------------
+# Phone Verification
+# ----------------------------
 class VerifyPhoneView(APIView):
     """
     POST /api/v1/auth/verify-phone/
-    
     Verify user's phone number with code
     """
     permission_classes = [permissions.IsAuthenticated]
-    
+
     def post(self, request):
         serializer = PhoneVerificationSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
-        
+
         user = request.user
-        phone_number = serializer.validated_data['phone_number']
-        verification_code = serializer.validated_data['verification_code']
-        
-        # TODO: Implement actual SMS verification logic
-        # For now, accept code '123456' as valid for testing
-        if verification_code == '123456':
+        code = serializer.validated_data['verification_code']
+
+        if code == '123456':  # Mock verification
             user.is_verified = True
             user.save(update_fields=['is_verified'])
-            
-            return Response({
-                'message': 'Phone number verified successfully',
-                'user': UserSerializer(user).data
-            }, status=status.HTTP_200_OK)
-        
-        return Response({
-            'error': 'Invalid verification code'
-        }, status=status.HTTP_400_BAD_REQUEST)
+            return Response({'message': 'Phone number verified successfully', 'user': UserSerializer(user).data}, status=status.HTTP_200_OK)
+
+        return Response({'error': 'Invalid verification code'}, status=status.HTTP_400_BAD_REQUEST)
 
 
 class SendVerificationCodeView(APIView):
     """
     POST /api/v1/auth/send-verification-code/
-    
     Send verification code to user's phone
     """
     permission_classes = [permissions.IsAuthenticated]
-    
+
     def post(self, request):
         user = request.user
-        
-        # TODO: Implement actual SMS sending logic using AfricasTalking or Twilio
-        # For now, return a mock success response
-        
-        # Generate 6-digit code
-        import random
         code = ''.join([str(random.randint(0, 9)) for _ in range(6)])
-        
-        # In production, send SMS here and store code in cache/database
-        # For testing, just return success
-        
-        return Response({
-            'message': f'Verification code sent to {user.phone_number}',
-            'code': code  # Remove this in production!
-        }, status=status.HTTP_200_OK)
+        # TODO: Send SMS via provider
+        return Response({'message': f'Verification code sent to {user.phone_number}', 'code': code}, status=status.HTTP_200_OK)
 
 
+# ----------------------------
+# User Management (Admin)
+# ----------------------------
 class UserListView(generics.ListAPIView):
     """
     GET /api/v1/auth/users/
-    
     List all users (admin only)
     """
     queryset = User.objects.all()
     serializer_class = UserDetailSerializer
     permission_classes = [permissions.IsAdminUser]
-    
+
     def get_queryset(self):
         queryset = super().get_queryset()
-        
-        # Filter by user type if provided
-        user_type = self.request.query_params.get('user_type')
-        if user_type:
-            queryset = queryset.filter(user_type=user_type)
-        
-        # Filter by verification status
-        is_verified = self.request.query_params.get('is_verified')
-        if is_verified is not None:
-            queryset = queryset.filter(is_verified=is_verified.lower() == 'true')
-        
-        # Filter by active status
-        is_active = self.request.query_params.get('is_active')
-        if is_active is not None:
-            queryset = queryset.filter(is_active=is_active.lower() == 'true')
-        
+        params = self.request.query_params
+        if 'user_type' in params:
+            queryset = queryset.filter(user_type=params['user_type'])
+        if 'is_verified' in params:
+            queryset = queryset.filter(is_verified=params['is_verified'].lower() == 'true')
+        if 'is_active' in params:
+            queryset = queryset.filter(is_active=params['is_active'].lower() == 'true')
         return queryset.order_by('-date_joined')
 
 
 class UserDetailView(generics.RetrieveAPIView):
     """
     GET /api/v1/auth/users/{id}/
-    
     Get user details by ID (admin only)
     """
     queryset = User.objects.all()
@@ -258,26 +272,41 @@ class UserDetailView(generics.RetrieveAPIView):
 
 
 @api_view(['GET'])
+@permission_classes([permissions.IsAdminUser])
+def user_statistics(request):
+    """
+    GET /api/v1/auth/statistics/
+    Get user statistics (admin only)
+    """
+    now = timezone.now()
+    stats = {
+        'total_users': User.objects.count(),
+        'by_type': User.objects.values('user_type').annotate(count=Count('id')),
+        'verified_users': User.objects.filter(is_verified=True).count(),
+        'unverified_users': User.objects.filter(is_verified=False).count(),
+        'active_users': User.objects.filter(is_active=True).count(),
+        'inactive_users': User.objects.filter(is_active=False).count(),
+        'new_users_today': User.objects.filter(date_joined__gte=now - timedelta(days=1)).count(),
+        'new_users_this_week': User.objects.filter(date_joined__gte=now - timedelta(days=7)).count(),
+        'new_users_this_month': User.objects.filter(date_joined__gte=now - timedelta(days=30)).count(),
+    }
+    return Response(stats, status=status.HTTP_200_OK)
+
+
+# ----------------------------
+# Account Actions
+# ----------------------------
+@api_view(['GET'])
 @permission_classes([permissions.IsAuthenticated])
 def check_auth_status(request):
     """
     GET /api/v1/auth/status/
-    
-    Check if user is authenticated and get basic info
+    Check if user is authenticated
     """
     user = request.user
-    
     return Response({
         'authenticated': True,
-        'user': {
-            'id': user.id,
-            'username': user.username,
-            'email': user.email,
-            'phone_number': user.phone_number,
-            'user_type': user.user_type,
-            'is_verified': user.is_verified,
-            'is_active': user.is_active
-        }
+        'user': UserDetailSerializer(user).data
     }, status=status.HTTP_200_OK)
 
 
@@ -286,221 +315,37 @@ def check_auth_status(request):
 def deactivate_account(request):
     """
     POST /api/v1/auth/deactivate/
-    
     Deactivate user's own account
     """
     user = request.user
-    
-    # Require password confirmation
     password = request.data.get('password')
-    if not password:
-        return Response({
-            'error': 'Password is required to deactivate account'
-        }, status=status.HTTP_400_BAD_REQUEST)
-    
-    if not user.check_password(password):
-        return Response({
-            'error': 'Incorrect password'
-        }, status=status.HTTP_400_BAD_REQUEST)
-    
-    # Deactivate account
+    if not password or not user.check_password(password):
+        return Response({'error': 'Incorrect or missing password'}, status=status.HTTP_400_BAD_REQUEST)
+
     user.is_active = False
     user.save(update_fields=['is_active'])
-    
-    return Response({
-        'message': 'Account deactivated successfully'
-    }, status=status.HTTP_200_OK)
+    return Response({'message': 'Account deactivated successfully'}, status=status.HTTP_200_OK)
 
 
-@api_view(['GET'])
-@permission_classes([permissions.IsAdminUser])
-def user_statistics(request):
-    """
-    GET /api/v1/auth/statistics/
-    
-    Get user statistics (admin only)
-    """
-    from django.db.models import Count, Q
-    from datetime import timedelta
-    
-    now = timezone.now()
-    
-    stats = {
-        'total_users': User.objects.count(),
-        'by_type': User.objects.values('user_type').annotate(count=Count('id')),
-        'verified_users': User.objects.filter(is_verified=True).count(),
-        'unverified_users': User.objects.filter(is_verified=False).count(),
-        'active_users': User.objects.filter(is_active=True).count(),
-        'inactive_users': User.objects.filter(is_active=False).count(),
-        'new_users_today': User.objects.filter(
-            date_joined__gte=now - timedelta(days=1)
-        ).count(),
-        'new_users_this_week': User.objects.filter(
-            date_joined__gte=now - timedelta(days=7)
-        ).count(),
-        'new_users_this_month': User.objects.filter(
-            date_joined__gte=now - timedelta(days=30)
-        ).count(),
-    }
-    
-    return Response(stats, status=status.HTTP_200_OK)
-
-
-class LoginView(APIView):
-    """
-    POST /api/v1/auth/login/
-    
-    Authenticate user and return JWT tokens
-    """
-    permission_classes = [permissions.AllowAny]
-    serializer_class = LoginSerializer
-    
-    def post(self, request):
-        serializer = LoginSerializer(data=request.data, context={'request': request})
-        serializer.is_valid(raise_exception=True)
-        
-        user = serializer.validated_data['user']
-        
-        # Update last login and activity  # UPDATED
-        from django.utils import timezone
-        user.last_login = timezone.now()
-        user.last_activity = timezone.now()  # NEW
-        user.save(update_fields=['last_login', 'last_activity'])
-        
-        # Login user
-        login(request, user)
-        
-        # Generate JWT tokens using AuthService  # UPDATED
-        tokens = AuthService.generate_tokens(user)
-        
-        # Create audit log  # NEW
-        AuthService.create_audit_log(
-            user=user,
-            action='login',
-            ip_address=self.get_client_ip(request),
-            user_agent=request.META.get('HTTP_USER_AGENT'),
-            metadata={'login_method': 'password'}
-        )
-        
-        return Response({
-            'message': 'Login successful',
-            'user': UserDetailSerializer(user).data,
-            'tokens': tokens  # UPDATED
-        }, status=status.HTTP_200_OK)
-    
-    def get_client_ip(self, request):
-        """Get client IP address"""
-        x_forwarded_for = request.META.get('HTTP_X_FORWARDED_FOR')
-        if x_forwarded_for:
-            ip = x_forwarded_for.split(',')[0]
-        else:
-            ip = request.META.get('REMOTE_ADDR')
-        return ip
-
-
-class LogoutView(APIView):
-    """
-    POST /api/v1/auth/logout/
-    
-    Logout user and blacklist refresh token
-    """
-    permission_classes = [permissions.IsAuthenticated]
-    
-    def post(self, request):
-        try:
-            # Create audit log  # NEW
-            AuthService.create_audit_log(
-                user=request.user,
-                action='logout',
-                ip_address=self.get_client_ip(request),
-                user_agent=request.META.get('HTTP_USER_AGENT')
-            )
-            
-            # Get refresh token from request
-            refresh_token = request.data.get('refresh_token')
-            
-            if refresh_token:
-                # Blacklist the refresh token
-                from rest_framework_simplejwt.tokens import RefreshToken
-                token = RefreshToken(refresh_token)
-                token.blacklist()
-            
-            # Logout user from session
-            logout(request)
-            
-            return Response({
-                'message': 'Logout successful'
-            }, status=status.HTTP_200_OK)
-        
-        except Exception as e:
-            return Response({
-                'error': 'Invalid token or logout failed'
-            }, status=status.HTTP_400_BAD_REQUEST)
-    
-    def get_client_ip(self, request):
-        """Get client IP address"""
-        x_forwarded_for = request.META.get('HTTP_X_FORWARDED_FOR')
-        if x_forwarded_for:
-            ip = x_forwarded_for.split(',')[0]
-        else:
-            ip = request.META.get('REMOTE_ADDR')
-        return ip
-
-
-# NEW: Audit Log View
+# ----------------------------
+# Audit Logs
+# ----------------------------
 class AuditLogListView(generics.ListAPIView):
     """
     GET /api/v1/auth/audit-logs/
-    
     List audit logs (own logs for users, all logs for admins)
     """
     serializer_class = AuditLogSerializer
     permission_classes = [permissions.IsAuthenticated]
-    
+
     def get_queryset(self):
         user = self.request.user
-        
-        # Admins see all logs
-        if user.is_staff or user.user_type == 'admin':
-            queryset = AuditLog.objects.all()
-        else:
-            # Users see only their own logs
-            queryset = AuditLog.objects.filter(user=user)
-        
-        # Filter by action if provided
-        action = self.request.query_params.get('action')
-        if action:
-            queryset = queryset.filter(action=action)
-        
-        # Filter by date range
-        from_date = self.request.query_params.get('from_date')
-        to_date = self.request.query_params.get('to_date')
-        
-        if from_date:
-            queryset = queryset.filter(timestamp__gte=from_date)
-        
-        if to_date:
-            queryset = queryset.filter(timestamp__lte=to_date)
-        
+        queryset = AuditLog.objects.all() if (user.is_staff or user.user_type == 'admin') else AuditLog.objects.filter(user=user)
+        params = self.request.query_params
+        if 'action' in params:
+            queryset = queryset.filter(action=params['action'])
+        if 'from_date' in params:
+            queryset = queryset.filter(timestamp__gte=params['from_date'])
+        if 'to_date' in params:
+            queryset = queryset.filter(timestamp__lte=params['to_date'])
         return queryset.order_by('-timestamp')
-
-
-# NEW: Password Strength Check
-@api_view(['POST'])
-@permission_classes([permissions.AllowAny])
-def check_password_strength(request):
-    """
-    POST /api/v1/auth/password/strength/
-    
-    Check password strength
-    """
-    password = request.data.get('password')
-    
-    if not password:
-        return Response({
-            'error': 'Password is required'
-        }, status=status.HTTP_400_BAD_REQUEST)
-    
-    strength = AuthService.check_password_strength(password)
-    
-    return Response(strength, status=status.HTTP_200_OK)

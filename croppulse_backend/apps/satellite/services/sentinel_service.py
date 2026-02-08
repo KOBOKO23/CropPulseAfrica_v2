@@ -42,12 +42,57 @@ class SentinelService:
             if not end_date:
                 end_date = datetime.now()
             if not start_date:
-                start_date = end_date - timedelta(days=7)
+                start_date = end_date - timedelta(days=30)  # Extended to 30 days
             
             # Convert farm boundary to Earth Engine geometry
             geometry = self._create_geometry(farm_boundary)
             
             # Get Sentinel-1 SAR imagery
+            s1_collection = ee.ImageCollection('COPERNICUS/S1_GRD') \
+                .filterBounds(geometry) \
+                .filterDate(start_date.strftime('%Y-%m-%d'), end_date.strftime('%Y-%m-%d')) \
+                .filter(ee.Filter.listContains('transmitterReceiverPolarisation', 'VV')) \
+                .filter(ee.Filter.listContains('transmitterReceiverPolarisation', 'VH')) \
+                .filter(ee.Filter.eq('instrumentMode', 'IW'))
+            
+            # Get the most recent image
+            s1_image = s1_collection.sort('system:time_start', False).first()
+            
+            if s1_image is None:
+                raise Exception("No Sentinel-1 data available for the specified area and time range")
+            
+            # Calculate backscatter statistics
+            vh_stats = s1_image.select('VH').reduceRegion(
+                reducer=ee.Reducer.mean(),
+                geometry=geometry,
+                scale=10,
+                maxPixels=1e9
+            )
+            
+            vv_stats = s1_image.select('VV').reduceRegion(
+                reducer=ee.Reducer.mean(),
+                geometry=geometry,
+                scale=10,
+                maxPixels=1e9
+            )
+            
+            # Get image metadata
+            image_info = s1_image.getInfo()
+            
+            return {
+                'vh_backscatter': vh_stats.getInfo().get('VH'),
+                'vv_backscatter': vv_stats.getInfo().get('VV'),
+                'vh_vv_ratio': vh_stats.getInfo().get('VH') / vv_stats.getInfo().get('VV') if vv_stats.getInfo().get('VV') else None,
+                'acquisition_date': image_info['properties']['system:time_start'],
+                'orbit_direction': image_info['properties'].get('orbitProperties_pass', 'UNKNOWN'),
+                'image_url': self._generate_image_url(s1_image, geometry),
+                'resolution_meters': 10,
+                'satellite_type': 'sentinel1'
+            }
+            
+        except Exception as e:
+            logger.error(f"Error fetching Sentinel-1 data: {str(e)}")
+            raise
             sentinel1 = ee.ImageCollection('COPERNICUS/S1_GRD') \
                 .filterBounds(geometry) \
                 .filterDate(start_date.isoformat(), end_date.isoformat()) \
@@ -337,4 +382,124 @@ class SentinelService:
         
         except Exception as e:
             logger.error(f"Error verifying farm size: {str(e)}")
+            return None
+    
+    def get_sentinel2_data(self, farm_boundary, start_date=None, end_date=None):
+        """
+        Fetch Sentinel-2 optical data for a farm
+        
+        Args:
+            farm_boundary: GeoJSON polygon coordinates
+            start_date: Start date for imagery (defaults to 30 days ago)
+            end_date: End date for imagery (defaults to today)
+        
+        Returns:
+            dict: Satellite data including NDVI, cloud cover, and image URL
+        """
+        try:
+            # Default date range if not provided
+            if not end_date:
+                end_date = datetime.now()
+            if not start_date:
+                start_date = end_date - timedelta(days=30)
+            
+            # Convert farm boundary to Earth Engine geometry
+            geometry = self._create_geometry(farm_boundary)
+            
+            # Get Sentinel-2 Surface Reflectance imagery
+            s2_collection = ee.ImageCollection('COPERNICUS/S2_SR_HARMONIZED') \
+                .filterBounds(geometry) \
+                .filterDate(start_date.strftime('%Y-%m-%d'), end_date.strftime('%Y-%m-%d')) \
+                .filter(ee.Filter.lt('CLOUDY_PIXEL_PERCENTAGE', 30))
+            
+            # Get the least cloudy image
+            s2_image = s2_collection.sort('CLOUDY_PIXEL_PERCENTAGE').first()
+            
+            if s2_image is None:
+                raise Exception("No suitable Sentinel-2 data available (cloud cover too high)")
+            
+            # Check if image has required bands
+            band_names = s2_image.bandNames()
+            required_bands = ['B2', 'B4', 'B8']
+            
+            # Calculate vegetation indices
+            ndvi = s2_image.normalizedDifference(['B8', 'B4']).rename('NDVI')
+            
+            # Calculate EVI with error handling
+            try:
+                evi = s2_image.expression(
+                    '2.5 * ((NIR - RED) / (NIR + 6 * RED - 7.5 * BLUE + 1))',
+                    {
+                        'NIR': s2_image.select('B8'),
+                        'RED': s2_image.select('B4'),
+                        'BLUE': s2_image.select('B2')
+                    }
+                ).rename('EVI')
+            except:
+                # Fallback if EVI calculation fails
+                evi = ndvi.rename('EVI')
+            
+            # Calculate statistics over the farm area
+            ndvi_stats = ndvi.reduceRegion(
+                reducer=ee.Reducer.mean(),
+                geometry=geometry,
+                scale=10,
+                maxPixels=1e9
+            )
+            
+            evi_stats = evi.reduceRegion(
+                reducer=ee.Reducer.mean(),
+                geometry=geometry,
+                scale=10,
+                maxPixels=1e9
+            )
+            
+            # Get image metadata
+            image_info = s2_image.getInfo()
+            
+            return {
+                'ndvi': ndvi_stats.getInfo().get('NDVI'),
+                'evi': evi_stats.getInfo().get('EVI'),
+                'cloud_cover': image_info['properties']['CLOUDY_PIXEL_PERCENTAGE'],
+                'acquisition_date': image_info['properties']['system:time_start'],
+                'image_url': self._generate_image_url(s2_image, geometry),
+                'resolution_meters': 10,
+                'satellite_type': 'sentinel2'
+            }
+            
+        except Exception as e:
+            logger.error(f"Error fetching Sentinel-2 data: {str(e)}")
+            raise
+    
+    def _create_geometry(self, farm_boundary):
+        """Convert GeoJSON boundary to Earth Engine geometry"""
+        if isinstance(farm_boundary, dict) and farm_boundary.get('type') == 'Polygon':
+            coordinates = farm_boundary['coordinates'][0]
+            # Convert to [lng, lat] format for Earth Engine
+            ee_coords = [[coord[1], coord[0]] for coord in coordinates]
+            return ee.Geometry.Polygon([ee_coords])
+        else:
+            raise ValueError("Invalid farm boundary format. Expected GeoJSON Polygon.")
+    
+    def _generate_image_url(self, image, geometry):
+        """Generate a URL for visualizing the satellite image"""
+        try:
+            # Create visualization parameters
+            vis_params = {
+                'min': 0,
+                'max': 3000,
+                'bands': ['B4', 'B3', 'B2'] if 'B4' in image.bandNames().getInfo() else ['VV']
+            }
+            
+            # Generate thumbnail URL
+            url = image.getThumbURL({
+                'region': geometry,
+                'dimensions': 512,
+                'format': 'png',
+                **vis_params
+            })
+            
+            return url
+        except Exception as e:
+            logger.warning(f"Could not generate image URL: {str(e)}")
             return None

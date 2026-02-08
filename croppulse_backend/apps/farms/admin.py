@@ -24,7 +24,7 @@ class FarmAdmin(GISModelAdmin):
         'farm_id',
         'farmer_link',
         'county',
-        'size_display',
+        'get_size_display',
         'verification_badge',
         'primary_badge',
         'satellite_scans_count',
@@ -103,15 +103,17 @@ class FarmAdmin(GISModelAdmin):
         )
     farmer_link.short_description = 'Farmer'
     
-    def size_display(self, obj):
+    def get_size_display(self, obj):
         """Display farm size with both units"""
-        return format_html(
-            '<strong>{:.2f}</strong> acres<br/>'
-            '<span style="color: #6b7280; font-size: 11px;">{:.2f} hectares</span>',
-            obj.size_acres,
-            obj.size_hectares
-        )
-    size_display.short_description = 'Size'
+        if obj.size_acres and obj.size_hectares:
+            return format_html(
+                '<strong>{:.2f}</strong> acres<br/>'
+                '<span style="color: #6b7280; font-size: 11px;">{:.2f} hectares</span>',
+                float(obj.size_acres),
+                float(obj.size_hectares)
+            )
+        return "Not set"
+    get_size_display.short_description = 'Size'
     
     def verification_badge(self, obj):
         """Display verification status"""

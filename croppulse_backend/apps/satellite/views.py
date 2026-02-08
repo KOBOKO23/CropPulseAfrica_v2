@@ -495,3 +495,69 @@ def rescan_farm(request, farm_id):
         'farm_id': farm_id,
         'task_id': task.id,
     }, status=status.HTTP_202_ACCEPTED)
+
+
+class FarmVerificationView(APIView):
+    """
+    POST /api/v1/satellite/farms/{farm_id}/verify/
+    
+    Trigger satellite verification for a specific farm
+    """
+    permission_classes = [permissions.IsAuthenticated, IsFarmerOrAdmin]
+    
+    def post(self, request, farm_id):
+        farm = get_object_or_404(Farm, farm_id=farm_id)
+        
+        # Check permissions
+        if request.user.user_type == 'farmer':
+            if farm.farmer.user != request.user:
+                return Response({
+                    'error': 'You do not have permission to verify this farm',
+                }, status=status.HTTP_403_FORBIDDEN)
+        
+        # Create a new satellite scan for verification
+        scan = SatelliteScan.objects.create(
+            farm=farm,
+            satellite_type='sentinel2',
+            processing_status='pending',
+            acquisition_date=timezone.now(),
+            cloud_cover_percentage=0,  # Will be updated during processing
+            verified_farm_size=0,  # Will be calculated during processing
+            scan_id=f'VERIFY_{farm_id}_{timezone.now().strftime("%Y%m%d_%H%M%S")}'
+        )
+        
+        # Trigger actual satellite processing task
+        task = process_satellite_scan.delay(scan.id)
+        
+        return Response({
+            'success': True,
+            'message': 'Satellite verification initiated successfully',
+            'verification_id': f'verify_{farm_id}_{scan.id}',
+            'status': 'processing',
+            'scan_id': scan.scan_id,
+            'task_id': task.id,
+            'estimated_completion': '5-10 minutes'
+        }, status=status.HTTP_202_ACCEPTED)
+    
+    def get(self, request, farm_id):
+        """Get verification status for a farm"""
+        farm = get_object_or_404(Farm, farm_id=farm_id)
+        
+        # Get latest verification scan
+        latest_scan = SatelliteScan.objects.filter(
+            farm=farm
+        ).order_by('-acquisition_date').first()
+        
+        if not latest_scan:
+            return Response({
+                'status': 'no_verification',
+                'message': 'No verification scans found for this farm'
+            }, status=status.HTTP_404_NOT_FOUND)
+        
+        return Response({
+            'status': 'verified' if latest_scan.processing_status == 'completed' else latest_scan.processing_status,
+            'confidence_score': latest_scan.data_quality_score or 0,
+            'verified_area': float(latest_scan.verified_farm_size) if latest_scan.verified_farm_size else 0,
+            'last_updated': latest_scan.acquisition_date,
+            'verification_status': 'verified' if latest_scan.processing_status == 'completed' else 'processing'
+        }, status=status.HTTP_200_OK)

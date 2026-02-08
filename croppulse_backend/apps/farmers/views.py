@@ -36,27 +36,46 @@ class FarmerCreateView(generics.CreateAPIView):
     Create a new farmer profile
     """
     serializer_class = FarmerCreateSerializer
-    permission_classes = [permissions.IsAuthenticated]
+    permission_classes = [permissions.AllowAny]
     
     def create(self, request, *args, **kwargs):
-        # Check if user already has a farmer profile
-        if hasattr(request.user, 'farmer_profile'):
+        # Extract user credentials
+        phone_number = request.data.get('phone_number')
+        password = request.data.get('password')
+        email = request.data.get('email') or f"{phone_number}@croppulse.local"
+        
+        if not phone_number or not password:
             return Response({
-                'error': 'You already have a farmer profile',
-                'pulse_id': request.user.farmer_profile.pulse_id
+                'error': 'phone_number and password are required'
             }, status=status.HTTP_400_BAD_REQUEST)
+        
+        # Check if user already exists
+        from apps.accounts.models import User
+        if User.objects.filter(phone_number=phone_number).exists():
+            return Response({
+                'error': 'A user with this phone number already exists'
+            }, status=status.HTTP_400_BAD_REQUEST)
+        
+        # Create user account
+        user = User.objects.create_user(
+            username=phone_number,
+            email=email,
+            phone_number=phone_number,
+            password=password,
+            user_type='farmer'
+        )
         
         # Add user to serializer context
         serializer = self.get_serializer(
             data=request.data,
-            context={'user': request.user}
+            context={'user': user}
         )
         serializer.is_valid(raise_exception=True)
         farmer = serializer.save()
         
         # Create audit log
         AuthService.create_audit_log(
-            user=request.user,
+            user=user,
             action='farmer_profile_created',
             ip_address=self.get_client_ip(request),
             metadata={'pulse_id': farmer.pulse_id}

@@ -10,6 +10,7 @@ from .views import (
     NDVITrendView,
     FarmHealthSummaryView,
     BulkScanTriggerView,
+    FarmVerificationView,
     satellite_statistics,
     rescan_farm
 )
@@ -25,6 +26,8 @@ urlpatterns = [
     
     # Farm-specific Scans
     path('farms/<str:farm_id>/latest-scan/', FarmLatestScanView.as_view(), name='farm_latest_scan'),
+    path('farms/<str:farm_id>/verify/', FarmVerificationView.as_view(), name='farm_verify'),
+    path('farms/<str:farm_id>/status/', FarmVerificationView.as_view(), name='farm_verification_status'),
     path('farms/<str:farm_id>/rescan/', rescan_farm, name='rescan_farm'),
     path('farms/<str:farm_id>/health-summary/', FarmHealthSummaryView.as_view(), name='farm_health_summary'),
     

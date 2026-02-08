@@ -10,6 +10,11 @@ class User(AbstractUser):
     """
     Extended user model with multi-tenant support
     """
+
+    USERNAME_FIELD = 'username'
+    REQUIRED_FIELDS = ['email', 'phone_number', 'user_type']
+
+    objects = UserManager()
     
     USER_TYPES = (
         ('farmer', 'Farmer'),
@@ -132,7 +137,7 @@ class AuditLog(models.Model):
     timestamp = models.DateTimeField(auto_now_add=True, db_index=True)
     
     class Meta:
-        db_table = 'audit_logs'
+        db_table = 'audit_logs_accounts'
         ordering = ['-timestamp']
         indexes = [
             models.Index(fields=['user', '-timestamp']),

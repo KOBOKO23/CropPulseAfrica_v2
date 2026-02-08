@@ -12,7 +12,7 @@ from datetime import date, timedelta
 from django.db import transaction
 
 from apps.loans.models import LoanRepayment
-from apps.loans.services import MpesaIntegration, RestructureService
+# from apps.loans.services import MpesaIntegration, RestructureService
 
 
 @shared_task(name='loans.flag_defaulted_loans')

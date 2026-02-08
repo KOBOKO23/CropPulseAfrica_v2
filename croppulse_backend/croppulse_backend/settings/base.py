@@ -18,11 +18,8 @@ env = environ.Env(
 )
 
 # Read .env file if it exists
-environ.Env.read_env()
-# ----------------------------------------------------------------------
-# Base directory
-# ----------------------------------------------------------------------
-BASE_DIR = Path(__file__).resolve().parent.parent
+BASE_DIR = Path(__file__).resolve().parent.parent.parent
+environ.Env.read_env(os.path.join(BASE_DIR, '.env'))
 
 # ----------------------------------------------------------------------
 # Security
@@ -48,6 +45,7 @@ INSTALLED_APPS = [
     # Third-party apps
     'rest_framework',
     'rest_framework_simplejwt',
+    'corsheaders',
     # Your apps will be added here later
     'apps.accounts.apps.AccountsConfig',
     'apps.farmers.apps.FarmersConfig',
@@ -55,12 +53,17 @@ INSTALLED_APPS = [
     'apps.satellite.apps.SatelliteConfig',
     'apps.banks.apps.BanksConfig',
     'apps.loans.apps.LoansConfig',
+    'apps.climate.apps.ClimateConfig',
+    'apps.scoring.apps.ScoringConfig',
+    'apps.admin_portal.apps.AdminPortalConfig',
+    'apps.compliance.apps.ComplianceConfig',
 ]
 
 # ----------------------------------------------------------------------
 # Middleware
 # ----------------------------------------------------------------------
 MIDDLEWARE = [
+    'corsheaders.middleware.CorsMiddleware',
     'django.middleware.security.SecurityMiddleware',
     'django.contrib.sessions.middleware.SessionMiddleware',
     'django.middleware.common.CommonMiddleware',
@@ -205,3 +208,15 @@ CELERY_BEAT_SCHEDULE = {
         'schedule': crontab(hour=8, minute=0),  # Run daily at 8 AM
     },
 }
+
+# ----------------------------------------------------------------------
+# CORS Configuration
+# ----------------------------------------------------------------------
+CORS_ALLOWED_ORIGINS = [
+    "http://localhost:3000",
+    "http://127.0.0.1:3000",
+]
+
+CORS_ALLOW_CREDENTIALS = True
+
+CORS_ALLOW_ALL_ORIGINS = True  # Only for development

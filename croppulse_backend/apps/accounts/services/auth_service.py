@@ -33,14 +33,28 @@ class AuthService:
         refresh['email'] = user.email
         refresh['phone_number'] = user.phone_number
         
+        access_lifetime = settings.SIMPLE_JWT.get('ACCESS_TOKEN_LIFETIME', 60)
+        refresh_lifetime = settings.SIMPLE_JWT.get('REFRESH_TOKEN_LIFETIME', 7)
+        
+        # Convert timedelta to minutes/days if needed
+        if hasattr(access_lifetime, 'total_seconds'):
+            access_minutes = access_lifetime.total_seconds() / 60
+        else:
+            access_minutes = access_lifetime
+            
+        if hasattr(refresh_lifetime, 'total_seconds'):
+            refresh_days = refresh_lifetime.total_seconds() / (24 * 3600)
+        else:
+            refresh_days = refresh_lifetime
+        
         return {
             'access': str(refresh.access_token),
             'refresh': str(refresh),
             'access_expires': (
-                timezone.now() + timedelta(minutes=settings.SIMPLE_JWT.get('ACCESS_TOKEN_LIFETIME', 60))
+                timezone.now() + timedelta(minutes=access_minutes)
             ).isoformat(),
             'refresh_expires': (
-                timezone.now() + timedelta(days=settings.SIMPLE_JWT.get('REFRESH_TOKEN_LIFETIME', 7))
+                timezone.now() + timedelta(days=refresh_days)
             ).isoformat()
         }
     

@@ -11,6 +11,9 @@ urlpatterns = [
     path('api/v1/satellite/', include('apps.satellite.urls')),
     path('api/v1/farmers/', include('apps.farmers.urls')),
     path('api/v1/farms/', include('apps.farms.urls')),
+    path('api/v1/climate/', include('apps.climate.urls')),
+    # path('api/v1/admin/', include('apps.admin_portal.urls')),  # Temporarily disabled
+    path('api/v1/compliance/', include('apps.compliance.urls')),
 ]
 
 

@@ -8,6 +8,7 @@ from .models import User, AuditLog
 
 class UserSerializer(serializers.ModelSerializer):
     """Serializer for User model"""
+    days_since_joined = serializers.SerializerMethodField()
     
     class Meta:
         model = User
@@ -42,6 +43,14 @@ class UserSerializer(serializers.ModelSerializer):
     def get_full_name(self, obj):
         """Get user's full name"""
         return obj.get_full_name()
+    
+    def get_days_since_joined(self, obj):
+        """Calculate days since user joined"""
+        from django.utils import timezone
+        if obj.date_joined:
+            delta = timezone.now() - obj.date_joined
+            return delta.days
+        return 0
 
 
 class UserRegistrationSerializer(serializers.ModelSerializer):
@@ -155,12 +164,25 @@ class LoginSerializer(serializers.Serializer):
         password = attrs.get('password')
         
         if username and password:
-            # Try authentication
+            # Try authentication with username
             user = authenticate(
                 request=self.context.get('request'),
                 username=username,
                 password=password
             )
+            
+            # If authentication fails, try with phone number as username
+            if not user:
+                try:
+                    from .models import User
+                    user_obj = User.objects.get(phone_number=username)
+                    user = authenticate(
+                        request=self.context.get('request'),
+                        username=user_obj.username,
+                        password=password
+                    )
+                except User.DoesNotExist:
+                    pass
             
             if not user:
                 raise serializers.ValidationError(

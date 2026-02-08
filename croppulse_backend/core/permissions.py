@@ -1,5 +1,3 @@
-# core/permissions.py
-
 from rest_framework import permissions
 
 
@@ -10,15 +8,12 @@ class IsFarmerOwnerOrAdmin(permissions.BasePermission):
     """
     
     def has_object_permission(self, request, view, obj):
-        # Admin users can access anything
-        if request.user.is_staff or request.user.user_type == 'admin':
+        if request.user.is_staff or getattr(request.user, 'user_type', None) == 'admin':
             return True
         
-        # Bank users can access (read-only)
-        if request.user.user_type == 'bank' and request.method in permissions.SAFE_METHODS:
+        if getattr(request.user, 'user_type', None) == 'bank' and request.method in permissions.SAFE_METHODS:
             return True
         
-        # Farmers can only access their own data
         if hasattr(obj, 'user'):
             return obj.user == request.user
         
@@ -29,27 +24,34 @@ class IsFarmerOwnerOrAdmin(permissions.BasePermission):
 
 
 class IsFarmerOrAdmin(permissions.BasePermission):
-    """
-    Permission for farmer or admin users only
-    """
+    """Permission for farmer or admin users only"""
     
     def has_permission(self, request, view):
-        return request.user.user_type in ['farmer', 'admin'] or request.user.is_staff
+        return getattr(request.user, 'user_type', None) in ['farmer', 'admin'] or request.user.is_staff
 
 
 class IsBankOrAdmin(permissions.BasePermission):
-    """
-    Permission for bank or admin users only
-    """
+    """Permission for bank or admin users only"""
     
     def has_permission(self, request, view):
-        return request.user.user_type in ['bank', 'admin'] or request.user.is_staff
+        return getattr(request.user, 'user_type', None) in ['bank', 'admin'] or request.user.is_staff
 
 
 class IsAdminOnly(permissions.BasePermission):
-    """
-    Permission for admin users only
-    """
+    """Permission for admin users only"""
     
     def has_permission(self, request, view):
-        return request.user.user_type == 'admin' or request.user.is_staff
+        return getattr(request.user, 'user_type', None) == 'admin' or request.user.is_staff
+
+
+class IsTenantUser(permissions.BasePermission):
+    """
+    Permission for users that belong to a tenant
+    (organization, cooperative, bank, etc.)
+    """
+    def has_permission(self, request, view):
+        return (
+            request.user
+            and request.user.is_authenticated
+            and hasattr(request.user, "tenant")
+        )

@@ -18,7 +18,9 @@ from .views import (
     validate_boundary,  # NEW
     check_overlap,  # NEW
     simplify_boundary,  # NEW
-    get_boundary_analysis  # NEW
+    get_boundary_analysis,  # NEW
+    upload_gps_boundary,  # MOBILE
+    get_verification_status,  # MOBILE
 )
 
 app_name = 'farms'
@@ -54,4 +56,8 @@ urlpatterns = [
     
     # Statistics
     path('statistics/', farm_statistics, name='farm_statistics'),
+    
+    # Mobile GPS Integration
+    path('gps-boundary/upload/', upload_gps_boundary, name='upload_gps_boundary'),
+    path('<str:farm_id>/verification-status/', get_verification_status, name='verification_status'),
 ]

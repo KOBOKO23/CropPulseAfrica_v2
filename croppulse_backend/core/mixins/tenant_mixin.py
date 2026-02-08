@@ -1,1 +1,2 @@
-# Filter by bank
+class TenantMixin:
+    pass
