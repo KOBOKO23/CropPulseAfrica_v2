@@ -1,4 +1,4 @@
-# compliance/models.py
+# apps/compliance/models.py
 from django.db import models
 from django.core.validators import MinValueValidator, MaxValueValidator
 from django.utils import timezone
@@ -7,14 +7,14 @@ from apps.farms.models import Farm
 from core.mixins.timestamp_mixin import TimestampMixin
 from core.mixins.tenant_mixin import TenantMixin
 import uuid
-from datetime import timedelta
+from datetime import timedelta, date
 
 class ExportPassport(TenantMixin, TimestampMixin, models.Model):
     """EUDR Digital Export Passport - Compliant with EU Regulation 2023/1115"""
     
     # Primary Identifiers
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
-    passport_id = models.CharField(max_length=50, unique=True, db_index=True)  # e.g., EU-KE-2026-7821
+    passport_id = models.CharField(max_length=50, unique=True, db_index=True, blank=True)
     
     # Relationships
     farmer = models.ForeignKey(
@@ -35,7 +35,7 @@ class ExportPassport(TenantMixin, TimestampMixin, models.Model):
         db_index=True,
         help_text="Due Diligence Statement Reference Number"
     )
-    operator_name = models.CharField(max_length=255, help_text="EU Operator/Trader Name", default='Unknown')
+    operator_name = models.CharField(max_length=255, help_text="EU Operator/Trader Name")
     operator_eori = models.CharField(max_length=50, blank=True, null=True, help_text="EORI Number")
     commodity_type = models.CharField(
         max_length=50,
@@ -50,11 +50,11 @@ class ExportPassport(TenantMixin, TimestampMixin, models.Model):
         ],
         default='COFFEE'
     )
-    commodity_code = models.CharField(max_length=20, help_text="CN/HS Code", default='0000')
+    commodity_code = models.CharField(max_length=20, help_text="CN/HS Code")
     
     # Deforestation Verification
     baseline_date = models.DateField(
-        default='2020-12-31',
+        default=date(2020, 12, 31),
         help_text="EUDR baseline cutoff date"
     )
     deforestation_status = models.CharField(
@@ -80,28 +80,20 @@ class ExportPassport(TenantMixin, TimestampMixin, models.Model):
     satellite_analysis_date = models.DateField(auto_now_add=True)
     
     # Geolocation Data (EUDR Article 9)
-    # Geolocation Data (EUDR Article 9)
     gps_coordinates = models.JSONField(
         help_text="Farm corner coordinates: [{lat, lng}, ...]",
-        default=list  # ensures empty list for existing rows
+        default=list
     )
     centroid_latitude = models.DecimalField(
         max_digits=10,
         decimal_places=7,
-        default=0.0,  # default for existing rows
+        default=0.0,
     )
     centroid_longitude = models.DecimalField(
         max_digits=10,
         decimal_places=7,
-        default=0.0,  # default for existing rows
+        default=0.0,
     )
-    farm_size_hectares = models.DecimalField(
-        max_digits=10, 
-        decimal_places=4,
-        validators=[MinValueValidator(0.01)]
-    )
-    plot_area_sqm = models.DecimalField(max_digits=12, decimal_places=2, null=True, blank=True)
-
     farm_size_hectares = models.DecimalField(
         max_digits=10, 
         decimal_places=4,
@@ -170,7 +162,7 @@ class ExportPassport(TenantMixin, TimestampMixin, models.Model):
     
     # Validity & Status
     issued_date = models.DateField(auto_now_add=True)
-    valid_until = models.DateField(help_text="Passport expires after 1 year typically")
+    valid_until = models.DateField(help_text="Passport expires after 1 year typically", null=True, blank=True)
     is_active = models.BooleanField(default=True)
     is_verified = models.BooleanField(default=False)
     verified_by = models.CharField(max_length=255, blank=True, null=True)
@@ -220,8 +212,8 @@ class ExportPassport(TenantMixin, TimestampMixin, models.Model):
             self.passport_id = self.generate_passport_id()
         
         # Set valid_until to 1 year from issue if not set
-        if not self.valid_until:
-            self.valid_until = self.issued_date + timedelta(days=365)
+        if not self.pk and not self.valid_until:  # Only on creation
+            self.valid_until = timezone.now().date() + timedelta(days=365)
         
         super().save(*args, **kwargs)
     
@@ -229,7 +221,7 @@ class ExportPassport(TenantMixin, TimestampMixin, models.Model):
         """Generate unique passport ID: EU-{COUNTRY}-{YEAR}-{SEQUENCE}"""
         from django.db.models import Max
         
-        country_code = getattr(self.tenant, 'country_code', 'KE')
+        country_code = 'KE'  # Default to Kenya, adjust based on your needs
         year = timezone.now().year
         
         # Get last sequence number for this year
@@ -253,16 +245,20 @@ class ExportPassport(TenantMixin, TimestampMixin, models.Model):
             'user': user,
             'details': details or {}
         }
+        if self.audit_trail is None:
+            self.audit_trail = []
         self.audit_trail.append(entry)
         self.save(update_fields=['audit_trail', 'updated_at'])
     
     def is_expired(self):
         """Check if passport has expired"""
+        if not self.valid_until:
+            return False
         return timezone.now().date() > self.valid_until
     
     def days_until_expiry(self):
         """Calculate days remaining until expiry"""
-        if self.is_expired():
+        if not self.valid_until or self.is_expired():
             return 0
         return (self.valid_until - timezone.now().date()).days
 
@@ -302,7 +298,7 @@ class DeforestationCheck(TenantMixin, TimestampMixin, models.Model):
     # Analysis Period
     analysis_start_date = models.DateField(help_text="Start of analysis period")
     analysis_end_date = models.DateField(help_text="End of analysis period")
-    baseline_date = models.DateField(default='2020-12-31')
+    baseline_date = models.DateField(default=date(2020, 12, 31))
     
     # Forest Cover Analysis
     deforestation_detected = models.BooleanField(default=False)
@@ -537,6 +533,7 @@ class AuditLog(TenantMixin, TimestampMixin, models.Model):
             ('REJECT', 'Rejected'),
             ('EXPORT', 'Exported'),
             ('BLOCKCHAIN_ANCHOR', 'Blockchain Anchored'),
+            ('DEFORESTATION_CHECK', 'Deforestation Check'),
         ]
     )
     
