@@ -102,12 +102,8 @@ TEMPLATES = [
 # ----------------------------------------------------------------------
 DATABASES = {
     'default': {
-        'ENGINE': 'django.contrib.gis.db.backends.postgis',
-        'NAME': 'croppulse',
-        'USER': 'koboko',
-        'PASSWORD': 'KphiL2022*',
-        'HOST': 'localhost',
-        'PORT': '5432',
+        'ENGINE': 'django.db.backends.sqlite3',
+        'NAME': BASE_DIR / 'db.sqlite3',
     }
 }
 

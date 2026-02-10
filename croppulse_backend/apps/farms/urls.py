@@ -61,3 +61,16 @@ urlpatterns = [
     path('gps-boundary/upload/', upload_gps_boundary, name='upload_gps_boundary'),
     path('<str:farm_id>/verification-status/', get_verification_status, name='verification_status'),
 ]
+
+# Logistics and Insurance (NEW)
+from .views_logistics import (
+    verify_insurance_claim,
+    analyze_harvest_timing,
+    estimate_harvest_loss,
+)
+
+urlpatterns += [
+    path('insurance/verify-claim/', verify_insurance_claim, name='verify-insurance-claim'),
+    path('<int:farm_id>/harvest-timing/', analyze_harvest_timing, name='harvest-timing'),
+    path('<int:farm_id>/harvest-loss/', estimate_harvest_loss, name='harvest-loss'),
+]

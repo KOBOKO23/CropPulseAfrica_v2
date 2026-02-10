@@ -8,8 +8,13 @@ from rest_framework_simplejwt.tokens import RefreshToken
 from django.contrib.auth import login, logout
 from django.utils import timezone
 from django.db.models import Count
+from django.core.cache import cache
+from django.conf import settings
 from datetime import timedelta
 import random
+import logging
+
+logger = logging.getLogger(__name__)
 
 from .models import User, AuditLog
 from .services import AuthService, TenantService
@@ -214,12 +219,19 @@ class VerifyPhoneView(APIView):
         user = request.user
         code = serializer.validated_data['verification_code']
 
-        if code == '123456':  # Mock verification
+        # Verify code from cache/session
+        cached_code = cache.get(f'verification_code_{user.id}')
+        
+        if cached_code and cached_code == code:
             user.is_verified = True
             user.save(update_fields=['is_verified'])
-            return Response({'message': 'Phone number verified successfully', 'user': UserSerializer(user).data}, status=status.HTTP_200_OK)
+            cache.delete(f'verification_code_{user.id}')
+            return Response({
+                'message': 'Phone number verified successfully',
+                'user': UserSerializer(user).data
+            }, status=status.HTTP_200_OK)
 
-        return Response({'error': 'Invalid verification code'}, status=status.HTTP_400_BAD_REQUEST)
+        return Response({'error': 'Invalid or expired verification code'}, status=status.HTTP_400_BAD_REQUEST)
 
 
 class SendVerificationCodeView(APIView):
@@ -232,8 +244,22 @@ class SendVerificationCodeView(APIView):
     def post(self, request):
         user = request.user
         code = ''.join([str(random.randint(0, 9)) for _ in range(6)])
-        # TODO: Send SMS via provider
-        return Response({'message': f'Verification code sent to {user.phone_number}', 'code': code}, status=status.HTTP_200_OK)
+        
+        # Store code in cache for 10 minutes
+        cache.set(f'verification_code_{user.id}', code, timeout=600)
+        
+        # Send SMS via Africa's Talking or Twilio
+        try:
+            # TODO: Integrate SMS provider
+            # For now, log the code (remove in production)
+            logger.info(f'Verification code for {user.phone_number}: {code}')
+        except Exception as e:
+            logger.error(f'Failed to send SMS: {e}')
+        
+        return Response({
+            'message': f'Verification code sent to {user.phone_number}',
+            'code': code if settings.DEBUG else None  # Only show in debug mode
+        }, status=status.HTTP_200_OK)
 
 
 # ----------------------------

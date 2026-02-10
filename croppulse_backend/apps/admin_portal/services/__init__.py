@@ -1,7 +1,7 @@
 from .bank_manager import BankManager
-from .feature_flag_service import FeatureFlag
-from .global_settings import GlobalSettings
-from .system_monitoring import SystemMonitor
+from .feature_flag_service import FeatureFlagService
+from .global_settings import GlobalSettingsService
+from .system_monitor import SystemMonitor
 
 
-__all__ = ['bank_manager', 'feature_flag_service', 'global_settings', 'system_monitoring']
+__all__ = ['BankManager', 'FeatureFlagService', 'GlobalSettingsService', 'SystemMonitor']

@@ -57,3 +57,21 @@ urlpatterns = [
     # Statistics (Admin)
     path('statistics/', farmer_statistics, name='farmer_statistics'),
 ]
+
+# Verification Features (NEW)
+from .views_verification import (
+    GroundTruthReportListCreateView,
+    ProofOfActionListCreateView,
+    verify_ground_truth,
+    verify_proof_of_action,
+    send_sms_alert,
+)
+
+# Add to urlpatterns
+urlpatterns += [
+    path('ground-truth/', GroundTruthReportListCreateView.as_view(), name='ground-truth-list'),
+    path('ground-truth/<int:pk>/verify/', verify_ground_truth, name='ground-truth-verify'),
+    path('proof-of-action/', ProofOfActionListCreateView.as_view(), name='proof-of-action-list'),
+    path('proof-of-action/<int:pk>/verify/', verify_proof_of_action, name='proof-of-action-verify'),
+    path('sms/send/', send_sms_alert, name='send-sms-alert'),
+]

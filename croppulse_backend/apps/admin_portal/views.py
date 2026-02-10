@@ -52,7 +52,7 @@ class FeatureFlagListCreateView(generics.ListCreateAPIView):
     """
     queryset = FeatureFlag.objects.all()
     serializer_class = FeatureFlagSerializer
-    permission_classes = [IsAdminUser]
+    permission_classes = [IsAdminOnly]
     
     def get_queryset(self):
         queryset = super().get_queryset()
@@ -82,12 +82,12 @@ class FeatureFlagDetailView(generics.RetrieveUpdateDestroyAPIView):
     """
     queryset = FeatureFlag.objects.all()
     serializer_class = FeatureFlagSerializer
-    permission_classes = [IsAdminUser]
+    permission_classes = [IsAdminOnly]
     lookup_field = 'id'
 
 
 @api_view(['POST'])
-@permission_classes([IsAdminUser])
+@permission_classes([IsAdminOnly])
 def toggle_feature_flag(request, id):
     """
     POST /api/v1/admin/feature-flags/{id}/toggle/
@@ -111,7 +111,7 @@ def toggle_feature_flag(request, id):
 
 
 @api_view(['GET'])
-@permission_classes([IsAdminUser])
+@permission_classes([IsAdminOnly])
 def feature_flag_usage_stats(request, id):
     """
     GET /api/v1/admin/feature-flags/{id}/stats/
@@ -138,7 +138,7 @@ class TenantFeatureFlagListCreateView(generics.ListCreateAPIView):
     """
     queryset = TenantFeatureFlag.objects.all()
     serializer_class = TenantFeatureFlagSerializer
-    permission_classes = [IsAdminUser]
+    permission_classes = [IsAdminOnly]
     
     def get_queryset(self):
         queryset = super().get_queryset()
@@ -163,7 +163,7 @@ class TenantFeatureFlagDetailView(generics.RetrieveUpdateDestroyAPIView):
     """
     queryset = TenantFeatureFlag.objects.all()
     serializer_class = TenantFeatureFlagSerializer
-    permission_classes = [IsAdminUser]
+    permission_classes = [IsAdminOnly]
     lookup_field = 'id'
 
 
@@ -178,7 +178,7 @@ class GlobalSettingsListCreateView(generics.ListCreateAPIView):
     """
     queryset = GlobalSettings.objects.all()
     serializer_class = GlobalSettingsSerializer
-    permission_classes = [IsAdminUser]
+    permission_classes = [IsAdminOnly]
     
     def get_queryset(self):
         queryset = super().get_queryset()
@@ -207,7 +207,7 @@ class GlobalSettingsDetailView(generics.RetrieveUpdateDestroyAPIView):
     """
     queryset = GlobalSettings.objects.all()
     serializer_class = GlobalSettingsSerializer
-    permission_classes = [IsAdminUser]
+    permission_classes = [IsAdminOnly]
     lookup_field = 'id'
     
     def get_serializer_context(self):
@@ -217,7 +217,7 @@ class GlobalSettingsDetailView(generics.RetrieveUpdateDestroyAPIView):
 
 
 @api_view(['POST'])
-@permission_classes([IsAdminUser])
+@permission_classes([IsAdminOnly])
 def bulk_update_settings(request):
     """
     POST /api/v1/admin/settings/bulk-update/
@@ -237,7 +237,7 @@ def bulk_update_settings(request):
 
 
 @api_view(['GET'])
-@permission_classes([IsAdminUser])
+@permission_classes([IsAdminOnly])
 def export_settings(request):
     """
     GET /api/v1/admin/settings/export/
@@ -251,7 +251,7 @@ def export_settings(request):
 
 
 @api_view(['POST'])
-@permission_classes([IsAdminUser])
+@permission_classes([IsAdminOnly])
 def import_settings(request):
     """
     POST /api/v1/admin/settings/import/
@@ -285,7 +285,7 @@ class SystemMetricsListView(generics.ListAPIView):
     """
     queryset = SystemMetrics.objects.all()
     serializer_class = SystemMetricsSerializer
-    permission_classes = [IsAdminUser]
+    permission_classes = [IsAdminOnly]
     
     def get_queryset(self):
         queryset = super().get_queryset()
@@ -312,7 +312,7 @@ class SystemMetricsListView(generics.ListAPIView):
 
 
 @api_view(['POST'])
-@permission_classes([IsAdminUser])
+@permission_classes([IsAdminOnly])
 def collect_system_metrics(request):
     """
     POST /api/v1/admin/metrics/collect/
@@ -334,7 +334,7 @@ def collect_system_metrics(request):
 
 
 @api_view(['GET'])
-@permission_classes([IsAdminUser])
+@permission_classes([IsAdminOnly])
 def system_health_summary(request):
     """
     GET /api/v1/admin/health/
@@ -355,7 +355,7 @@ class BankConfigurationListView(generics.ListAPIView):
     """
     queryset = BankConfiguration.objects.all()
     serializer_class = BankConfigurationSerializer
-    permission_classes = [IsAdminUser]
+    permission_classes = [IsAdminOnly]
     
     def get_queryset(self):
         queryset = super().get_queryset()
@@ -380,12 +380,12 @@ class BankConfigurationDetailView(generics.RetrieveUpdateAPIView):
     """
     queryset = BankConfiguration.objects.all()
     serializer_class = BankConfigurationSerializer
-    permission_classes = [IsAdminUser]
+    permission_classes = [IsAdminOnly]
     lookup_field = 'id'
 
 
 @api_view(['GET'])
-@permission_classes([IsAdminUser])
+@permission_classes([IsAdminOnly])
 def bank_statistics(request, bank_id):
     """
     GET /api/v1/admin/banks/{bank_id}/stats/
@@ -404,7 +404,7 @@ def bank_statistics(request, bank_id):
 
 
 @api_view(['GET'])
-@permission_classes([IsAdminUser])
+@permission_classes([IsAdminOnly])
 def all_banks_overview(request):
     """
     GET /api/v1/admin/banks/overview/
@@ -415,7 +415,7 @@ def all_banks_overview(request):
 
 
 @api_view(['POST'])
-@permission_classes([IsAdminUser])
+@permission_classes([IsAdminOnly])
 def update_bank_quota(request, bank_id):
     """
     POST /api/v1/admin/banks/{bank_id}/quota/
@@ -443,7 +443,7 @@ def update_bank_quota(request, bank_id):
 
 
 @api_view(['POST'])
-@permission_classes([IsAdminUser])
+@permission_classes([IsAdminOnly])
 def update_bank_billing_plan(request, bank_id):
     """
     POST /api/v1/admin/banks/{bank_id}/billing-plan/
@@ -482,7 +482,7 @@ class SystemAlertListCreateView(generics.ListCreateAPIView):
     List and create system alerts
     """
     queryset = SystemAlert.objects.all()
-    permission_classes = [IsAdminUser]
+    permission_classes = [IsAdminOnly]
     
     def get_serializer_class(self):
         if self.request.method == 'POST':
@@ -517,12 +517,12 @@ class SystemAlertDetailView(generics.RetrieveUpdateDestroyAPIView):
     """
     queryset = SystemAlert.objects.all()
     serializer_class = SystemAlertSerializer
-    permission_classes = [IsAdminUser]
+    permission_classes = [IsAdminOnly]
     lookup_field = 'id'
 
 
 @api_view(['POST'])
-@permission_classes([IsAdminUser])
+@permission_classes([IsAdminOnly])
 def resolve_alert(request, id):
     """
     POST /api/v1/admin/alerts/{id}/resolve/
@@ -542,7 +542,7 @@ def resolve_alert(request, id):
 
 
 @api_view(['POST'])
-@permission_classes([IsAdminUser])
+@permission_classes([IsAdminOnly])
 def bulk_resolve_alerts(request):
     """
     POST /api/v1/admin/alerts/bulk-resolve/
@@ -575,7 +575,7 @@ class APIUsageLogListView(generics.ListAPIView):
     """
     queryset = APIUsageLog.objects.all()
     serializer_class = APIUsageLogSerializer
-    permission_classes = [IsAdminUser]
+    permission_classes = [IsAdminOnly]
     
     def get_queryset(self):
         queryset = super().get_queryset()
@@ -618,7 +618,7 @@ class APIUsageLogListView(generics.ListAPIView):
 
 
 @api_view(['GET'])
-@permission_classes([IsAdminUser])
+@permission_classes([IsAdminOnly])
 def api_usage_stats(request):
     """
     GET /api/v1/admin/api-logs/stats/
@@ -701,7 +701,7 @@ class DataExportRequestListCreateView(generics.ListCreateAPIView):
     List and create data export requests
     """
     queryset = DataExportRequest.objects.all()
-    permission_classes = [IsAdminUser]
+    permission_classes = [IsAdminOnly]
     
     def get_serializer_class(self):
         if self.request.method == 'POST':
@@ -736,7 +736,7 @@ class DataExportRequestDetailView(generics.RetrieveAPIView):
     """
     queryset = DataExportRequest.objects.all()
     serializer_class = DataExportRequestSerializer
-    permission_classes = [IsAdminUser]
+    permission_classes = [IsAdminOnly]
     lookup_field = 'id'
 
 
@@ -745,7 +745,7 @@ class DataExportRequestDetailView(generics.RetrieveAPIView):
 # ===========================
 
 @api_view(['GET'])
-@permission_classes([IsAdminUser])
+@permission_classes([IsAdminOnly])
 def admin_dashboard(request):
     """
     GET /api/v1/admin/dashboard/

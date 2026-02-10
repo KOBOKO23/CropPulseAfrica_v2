@@ -4,6 +4,7 @@ Scoring App URLs
 
 from django.urls import path
 from apps.scoring import views
+from .views_reports import download_credit_report
 
 app_name = 'scoring'
 
@@ -17,4 +18,7 @@ urlpatterns = [
     
     # Fraud Alerts
     path('farmer/<int:farmer_id>/fraud-alerts/', views.FraudAlertsView.as_view(), name='fraud-alerts'),
+    
+    # NEW: Credit Report
+    path('farmer/<int:farmer_id>/credit-report/', download_credit_report, name='credit-report'),
 ]

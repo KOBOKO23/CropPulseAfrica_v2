@@ -1,11 +1,11 @@
-# apps/satellite/services/__init__.py
-from .fraud_detection import FraudDetectionAlgorithm
-from .score_freezer import ScoreFreezerAlgorithm
-from .score_engine import ScoreEngineAlgorithm
+# apps/scoring/algorithms/__init__.py
+from .fraud_detection import FraudDetector
+from .score_freezer import ScoreFreezer
+from .score_engine import PulseScoreEngine
 
 
 __all__ = [
-    "ScoreEngineAlgorithm",
-    "FraudDetectionAlgorithm",
-    "ScoreFreezerAlgorithm",    
+    "PulseScoreEngine",
+    "FraudDetector",
+    "ScoreFreezer",    
 ]
